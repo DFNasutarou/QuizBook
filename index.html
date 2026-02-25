@@ -11,6 +11,10 @@
         <header>
             <h1>早押しクイズ管理ツール</h1>
             <div class="header-controls">
+                <button id="syncToggleBtn" class="btn btn-sync" title="クラウド同期">
+                    <span id="syncIcon">☁️</span>
+                    <span id="syncStatus">同期OFF</span>
+                </button>
                 <button id="saveBtn" class="btn btn-primary">保存</button>
                 <button id="loadBtn" class="btn btn-secondary">読み込み</button>
                 <button id="importCsvBtn" class="btn btn-secondary">CSV インポート</button>
@@ -242,6 +246,41 @@
     <input type="file" id="fileInput" style="display:none;" accept=".json">
     <input type="file" id="csvFileInput" style="display:none;" accept=".csv">
 
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
+        import { getFirestore, collection, getDocs, addDoc, updateDoc, deleteDoc, doc, onSnapshot, setDoc, getDoc } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
+        
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyBbRH1NIdQ9qyRZ2ca_JHMGGXLcFmjGQnU",
+            authDomain: "quizbook-72cda.firebaseapp.com",
+            projectId: "quizbook-72cda",
+            storageBucket: "quizbook-72cda.firebasestorage.app",
+            messagingSenderId: "599299941857",
+            appId: "1:599299941857:web:06aef045d3abbf3c94dea0"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // Make Firebase available globally
+        window.firebaseDB = db;
+        window.firebaseUtils = {
+            collection,
+            getDocs,
+            addDoc,
+            updateDoc,
+            deleteDoc,
+            doc,
+            onSnapshot,
+            setDoc,
+            getDoc
+        };
+    </script>
+
+    <script src="firebase-sync.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

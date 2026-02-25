@@ -17,11 +17,18 @@ class QuizManager {
             fontSize: 14,
             quizFontSize: 20
         };
+        this.syncEnabled = false;  // 同期状態
+        this.isLoadingFromFirestore = false;  // Firestoreからの読み込み中フラグ
 
         this.init();
     }
 
-    init() {
+    async init() {
+        // Firebase初期化
+        if (window.firebaseSync) {
+            await window.firebaseSync.initialize();
+        }
+
         this.loadFromLocalStorage();
         this.setupEventListeners();
         this.setupKeyboardShortcuts();
@@ -62,6 +69,9 @@ class QuizManager {
         document.getElementById('loadBtn').addEventListener('click', () => this.loadFromFile());
         document.getElementById('importCsvBtn').addEventListener('click', () => this.importCsv());
         document.getElementById('exportCsvBtn').addEventListener('click', () => this.exportCsv());
+
+        // クラウド同期
+        document.getElementById('syncToggleBtn').addEventListener('click', () => this.toggleSync());
 
         // 問題集管理
         document.getElementById('newCollectionBtn').addEventListener('click', () => this.newCollection());
@@ -952,6 +962,11 @@ class QuizManager {
             saved_at: new Date().toISOString()
         };
         localStorage.setItem('quizManagerData', JSON.stringify(data));
+
+        // Firestoreにも同期（同期が有効な場合）
+        if (this.syncEnabled && window.firebaseSync && !this.isLoadingFromFirestore) {
+            window.firebaseSync.saveCollections(this.collections);
+        }
     }
 
     loadFromLocalStorage() {
@@ -979,6 +994,12 @@ class QuizManager {
             } catch (e) {
                 console.error('データの読み込みに失敗しました:', e);
             }
+        }
+
+        // 同期状態を復元
+        const syncState = localStorage.getItem('quizbook_sync_enabled');
+        if (syncState === 'true') {
+            this.enableSyncSilently();
         }
     }
 
@@ -1082,6 +1103,131 @@ class QuizManager {
         };
         reader.readAsText(file);
         event.target.value = '';
+    }
+
+    // ================== クラウド同期 ==================
+    async toggleSync() {
+        if (this.syncEnabled) {
+            // 同期を無効化
+            this.syncEnabled = false;
+            if (window.firebaseSync) {
+                window.firebaseSync.disableSync();
+            }
+            localStorage.setItem('quizbook_sync_enabled', 'false');
+            this.updateSyncUI();
+            alert('クラウド同期をOFFにしました\n\nデータはこのブラウザのみに保存されます。');
+        } else {
+            // 同期を有効化
+            if (!window.firebaseSync) {
+                alert('Firebase接続に失敗しました。ローカルモードで動作します。');
+                return;
+            }
+
+            const confirmed = confirm(
+                '🔄 クラウド同期を有効にしますか？\n\n' +
+                '✅ メリット:\n' +
+                '  • 複数のPC・ブラウザで自動同期\n' +
+                '  • データ変更が即座に反映\n' +
+                '  • データの自動バックアップ\n\n' +
+                '⚠️ 注意:\n' +
+                '  • 同じGoogleアカウントで使用する場合のみ推奨\n' +
+                '  • インターネット接続が必要\n\n' +
+                '続行しますか？'
+            );
+
+            if (!confirmed) return;
+
+            const success = await window.firebaseSync.enableSync();
+            if (!success) {
+                alert('同期の有効化に失敗しました。');
+                return;
+            }
+
+            this.syncEnabled = true;
+            localStorage.setItem('quizbook_sync_enabled', 'true');
+
+            // Firestoreからデータを読み込む
+            const firestoreData = await window.firebaseSync.loadCollections();
+            if (firestoreData && firestoreData.length > 0) {
+                const useFirestore = confirm(
+                    'クラウドにデータが見つかりました。\n\n' +
+                    `クラウド: ${firestoreData.length}個の問題集\n` +
+                    `ローカル: ${this.collections.length}個の問題集\n\n` +
+                    'クラウドのデータを使用しますか？\n（キャンセル = ローカルを優先）'
+                );
+
+                if (useFirestore) {
+                    this.isLoadingFromFirestore = true;
+                    this.collections = firestoreData;
+                    if (this.collections.length > 0) {
+                        this.currentCollection = this.collections[0];
+                    }
+                    this.updateUI();
+                    this.saveToLocalStorage();
+                    this.isLoadingFromFirestore = false;
+                }
+            } else {
+                // クラウドにデータがない場合、現在のデータをアップロード
+                await window.firebaseSync.saveCollections(this.collections);
+            }
+
+            // リアルタイム同期を開始
+            window.firebaseSync.startRealtimeSync((collections) => {
+                // 他のデバイスからの変更を受信
+                this.isLoadingFromFirestore = true;
+                this.collections = collections;
+                if (this.collections.length > 0 && !this.currentCollection) {
+                    this.currentCollection = this.collections[0];
+                }
+                this.updateUI();
+                this.saveToLocalStorage();
+                this.isLoadingFromFirestore = false;
+                console.log('Data synced from cloud');
+            });
+
+            this.updateSyncUI();
+            alert('✅ クラウド同期を有効にしました！\n\n他のPC・ブラウザでも同じデータが自動的に同期されます。');
+        }
+    }
+
+    async enableSyncSilently() {
+        if (!window.firebaseSync) return;
+
+        const success = await window.firebaseSync.enableSync();
+        if (!success) return;
+
+        this.syncEnabled = true;
+
+        // リアルタイム同期を開始
+        window.firebaseSync.startRealtimeSync((collections) => {
+            this.isLoadingFromFirestore = true;
+            this.collections = collections;
+            if (this.collections.length > 0 && !this.currentCollection) {
+                this.currentCollection = this.collections[0];
+            }
+            this.updateUI();
+            this.saveToLocalStorage();
+            this.isLoadingFromFirestore = false;
+            console.log('Data synced from cloud (silent)');
+        });
+
+        this.updateSyncUI();
+    }
+
+    updateSyncUI() {
+        const btn = document.getElementById('syncToggleBtn');
+        const icon = document.getElementById('syncIcon');
+        const status = document.getElementById('syncStatus');
+
+        if (this.syncEnabled) {
+            btn.classList.add('active');
+            icon.textContent = '☁️';
+            status.textContent = '同期ON';
+        } else {
+            btn.classList.remove('active');
+            icon.textContent = '☁️';
+            status.textContent = '同期OFF';
+        }
     }
 
     // ================== CSV操作 ==================
