@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "クイズ事実確認 自動入力",
+  "version": "1.0.0",
+  "description": "クイズ管理ツールからClaude.aiへの自動入力を支援します",
+  "permissions": [
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://claude.ai/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://claude.ai/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  }
+}

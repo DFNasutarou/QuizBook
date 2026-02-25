@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>拡張機能デバッグ</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            margin: 10px 5px;
+            cursor: pointer;
+        }
+        .success { background: #4CAF50; color: white; }
+        .error { background: #f44336; color: white; }
+        .info { background: #2196F3; color: white; }
+        pre {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔧 拡張機能デバッグツール</h1>
+
+    <h2>テスト1: Chrome API が利用可能か</h2>
+    <button onclick="testChromeAPI()">テスト実行</button>
+    <div id="test1Result"></div>
+
+    <h2>テスト2: データを保存してみる</h2>
+    <button onclick="testSaveData()">データ保存テスト</button>
+    <div id="test2Result"></div>
+
+    <h2>テスト3: 保存されたデータを読み込む</h2>
+    <button onclick="testLoadData()">データ読み込みテスト</button>
+    <div id="test3Result"></div>
+
+    <h2>テスト4: Claude.aiを開く（自動入力テスト）</h2>
+    <button onclick="testOpenClaude()">Claude.aiを開く</button>
+    <div id="test4Result"></div>
+
+    <script>
+        function testChromeAPI() {
+            const result = document.getElementById('test1Result');
+
+            if (typeof chrome !== 'undefined' && chrome.storage) {
+                result.innerHTML = `
+                    <div class="result success">
+                        ✅ 成功: Chrome Storage API が利用可能です<br>
+                        <pre>${JSON.stringify({
+                            chrome: 'available',
+                            storage: 'available',
+                            tabs: chrome.tabs ? 'available' : 'not available'
+                        }, null, 2)}</pre>
+                    </div>
+                `;
+            } else {
+                result.innerHTML = `
+                    <div class="result error">
+                        ❌ エラー: Chrome Storage API が利用できません<br>
+                        拡張機能が正しくインストールされていない可能性があります
+                    </div>
+                `;
+            }
+        }
+
+        function testSaveData() {
+            const result = document.getElementById('test2Result');
+            const testPrompt = 'これはテストメッセージです。日時: ' + new Date().toLocaleString();
+
+            if (typeof chrome !== 'undefined' && chrome.storage) {
+                chrome.storage.local.set({ quizFactCheckPrompt: testPrompt }, () => {
+                    result.innerHTML = `
+                        <div class="result success">
+                            ✅ 成功: データを保存しました<br>
+                            <pre>${testPrompt}</pre>
+                        </div>
+                    `;
+                });
+            } else {
+                result.innerHTML = `
+                    <div class="result error">
+                        ❌ エラー: Chrome Storage が利用できません
+                    </div>
+                `;
+            }
+        }
+
+        function testLoadData() {
+            const result = document.getElementById('test3Result');
+
+            if (typeof chrome !== 'undefined' && chrome.storage) {
+                chrome.storage.local.get(['quizFactCheckPrompt'], (data) => {
+                    if (data.quizFactCheckPrompt) {
+                        result.innerHTML = `
+                            <div class="result success">
+                                ✅ 成功: データを読み込みました<br>
+                                <pre>${data.quizFactCheckPrompt}</pre>
+                            </div>
+                        `;
+                    } else {
+                        result.innerHTML = `
+                            <div class="result info">
+                                ℹ️ 情報: 保存されているデータがありません<br>
+                                先に「データ保存テスト」を実行してください
+                            </div>
+                        `;
+                    }
+                });
+            } else {
+                result.innerHTML = `
+                    <div class="result error">
+                        ❌ エラー: Chrome Storage が利用できません
+                    </div>
+                `;
+            }
+        }
+
+        function testOpenClaude() {
+            const result = document.getElementById('test4Result');
+            const testPrompt = `テスト質問
+
+【問題文】
+日本の首都はどこですか？
+
+【答え】
+東京
+
+これは拡張機能のテストです。この質問が自動で入力・送信されれば成功です。`;
+
+            if (typeof chrome !== 'undefined' && chrome.storage) {
+                chrome.storage.local.set({ quizFactCheckPrompt: testPrompt }, () => {
+                    window.open('https://claude.ai/new', '_blank');
+
+                    result.innerHTML = `
+                        <div class="result info">
+                            ℹ️ Claude.aiを開きました<br>
+                            <strong>確認事項：</strong><br>
+                            1. Claude.aiのタブで F12 を押してコンソールを開く<br>
+                            2. "[クイズ事実確認]" で始まるログを確認<br>
+                            3. 自動で質問が入力・送信されるか確認<br>
+                            <br>
+                            <strong>保存したデータ：</strong><br>
+                            <pre>${testPrompt}</pre>
+                        </div>
+                    `;
+                });
+            } else {
+                result.innerHTML = `
+                    <div class="result error">
+                        ❌ エラー: Chrome Storage が利用できません
+                    </div>
+                `;
+            }
+        }
+
+        // ページ読み込み時に自動テスト
+        window.addEventListener('load', () => {
+            testChromeAPI();
+        });
+    </script>
+</body>
+</html>

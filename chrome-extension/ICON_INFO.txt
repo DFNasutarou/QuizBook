@@ -1,0 +1,54 @@
+アイコンファイルについて
+===================
+
+このChrome拡張機能には、以下のサイズのアイコンが必要です：
+- icon16.png (16x16ピクセル)
+- icon48.png (48x48ピクセル)
+- icon128.png (128x128ピクセル)
+
+アイコンがなくても拡張機能は正常に動作しますが、
+デフォルトアイコンが表示されます。
+
+アイコンの作成方法：
+------------------
+
+1. 無料アイコンサイトからダウンロード：
+   - https://www.flaticon.com/
+   - https://icons8.com/
+   - https://iconscout.com/
+
+2. キーワード例：
+   - "quiz"
+   - "question mark"
+   - "clipboard"
+   - "automation"
+
+3. ダウンロードしたアイコンを3つのサイズにリサイズ
+
+4. それぞれを icon16.png, icon48.png, icon128.png として保存
+
+5. このフォルダに配置
+
+6. chrome://extensions/ で拡張機能を再読み込み
+
+
+または、簡易的なアイコンを自分で作成：
+----------------------------------
+
+PowerShellで簡易アイコンを作成（Windowsのみ）：
+
+Add-Type -AssemblyName System.Drawing
+
+$sizes = @(16, 48, 128)
+foreach ($size in $sizes) {
+    $bmp = New-Object System.Drawing.Bitmap($size, $size)
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.Clear([System.Drawing.Color]::Blue)
+    $font = New-Object System.Drawing.Font("Arial", $size/2)
+    $brush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::White)
+    $g.DrawString("Q", $font, $brush, 0, 0)
+    $bmp.Save("icon$size.png")
+    $g.Dispose()
+}
+
+これで "Q" の文字が入った青いアイコンが作成されます。
