@@ -97,6 +97,7 @@ h1 {
     align-items: center;
     gap: 5px;
     font-weight: 500;
+    min-width: 140px;
 }
 
 .btn-sync:hover {
@@ -112,6 +113,11 @@ h1 {
 
 .btn-sync #syncIcon {
     font-size: 16px;
+}
+
+.btn-sync #syncStatus {
+    font-size: 12px;
+    white-space: nowrap;
 }
 
 .btn-small {

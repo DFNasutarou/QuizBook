@@ -3,6 +3,7 @@ class FirebaseSync {
     constructor() {
         this.db = null;
         this.userId = null;
+        this.syncCode = null;
         this.unsubscribe = null;
         this.syncEnabled = false;
         this.initialized = false;
@@ -18,21 +19,61 @@ class FirebaseSync {
         }
 
         this.db = window.firebaseDB;
-        this.userId = this.getUserId();
         this.initialized = true;
         
-        console.log('Firebase Sync initialized with userId:', this.userId);
+        // 既存の同期コードを復元
+        const savedCode = localStorage.getItem('quizbook_sync_code');
+        if (savedCode) {
+            this.syncCode = savedCode;
+            this.userId = this.syncCodeToUserId(savedCode);
+            console.log('Firebase Sync initialized with existing sync code');
+        }
+        
         return true;
     }
 
-    getUserId() {
-        // ローカルストレージからユーザーIDを取得、なければ生成
-        let userId = localStorage.getItem('quizbook_user_id');
-        if (!userId) {
-            userId = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-            localStorage.setItem('quizbook_user_id', userId);
+    // 同期コードを生成（6桁の英数字）
+    generateSyncCode() {
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 紛らわしい文字を除外
+        let code = '';
+        for (let i = 0; i < 6; i++) {
+            code += chars.charAt(Math.floor(Math.random() * chars.length));
         }
-        return userId;
+        return code;
+    }
+
+    // 同期コードからユーザーIDを生成
+    syncCodeToUserId(syncCode) {
+        return 'sync_' + syncCode.toUpperCase();
+    }
+
+    // 同期コードを設定
+    setSyncCode(code) {
+        const upperCode = code.toUpperCase().trim();
+        
+        // 6桁の英数字チェック
+        if (!/^[A-Z0-9]{6}$/.test(upperCode)) {
+            return { success: false, error: '同期コードは6桁の英数字である必要があります' };
+        }
+
+        this.syncCode = upperCode;
+        this.userId = this.syncCodeToUserId(upperCode);
+        localStorage.setItem('quizbook_sync_code', upperCode);
+        
+        console.log('Sync code set:', upperCode);
+        return { success: true };
+    }
+
+    // 同期コードを取得
+    getSyncCode() {
+        return this.syncCode || localStorage.getItem('quizbook_sync_code');
+    }
+
+    // 同期コードをクリア
+    clearSyncCode() {
+        this.syncCode = null;
+        this.userId = null;
+        localStorage.removeItem('quizbook_sync_code');
     }
 
     async enableSync() {

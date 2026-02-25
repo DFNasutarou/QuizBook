@@ -72,6 +72,29 @@ class QuizManager {
 
         // クラウド同期
         document.getElementById('syncToggleBtn').addEventListener('click', () => this.toggleSync());
+        
+        // 同期コード表示（右クリック or 長押し）
+        const syncBtn = document.getElementById('syncToggleBtn');
+        let longPressTimer;
+        
+        syncBtn.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            this.showSyncCode();
+        });
+        
+        syncBtn.addEventListener('touchstart', () => {
+            longPressTimer = setTimeout(() => {
+                this.showSyncCode();
+            }, 800);
+        });
+        
+        syncBtn.addEventListener('touchend', () => {
+            clearTimeout(longPressTimer);
+        });
+        
+        syncBtn.addEventListener('touchmove', () => {
+            clearTimeout(longPressTimer);
+        });
 
         // 問題集管理
         document.getElementById('newCollectionBtn').addEventListener('click', () => this.newCollection());
@@ -1109,6 +1132,14 @@ class QuizManager {
     async toggleSync() {
         if (this.syncEnabled) {
             // 同期を無効化
+            const confirmDisable = confirm(
+                '⚠️ クラウド同期をOFFにしますか？\n\n' +
+                '同期コードは保持されますが、自動同期は停止します。\n' +
+                '再度ONにすれば同じデータにアクセスできます。'
+            );
+            
+            if (!confirmDisable) return;
+            
             this.syncEnabled = false;
             if (window.firebaseSync) {
                 window.firebaseSync.disableSync();
@@ -1123,19 +1154,37 @@ class QuizManager {
                 return;
             }
 
-            const confirmed = confirm(
-                '🔄 クラウド同期を有効にしますか？\n\n' +
-                '✅ メリット:\n' +
-                '  • 複数のPC・ブラウザで自動同期\n' +
-                '  • データ変更が即座に反映\n' +
-                '  • データの自動バックアップ\n\n' +
-                '⚠️ 注意:\n' +
-                '  • 同じGoogleアカウントで使用する場合のみ推奨\n' +
-                '  • インターネット接続が必要\n\n' +
-                '続行しますか？'
-            );
+            // 既存の同期コードを確認
+            const existingCode = window.firebaseSync.getSyncCode();
+            
+            let syncCode;
+            if (existingCode) {
+                // 既存のコードがある場合
+                const useExisting = confirm(
+                    `📱 保存されている同期コードが見つかりました\n\n` +
+                    `同期コード: ${existingCode}\n\n` +
+                    `このコードで同期しますか？\n` +
+                    `(キャンセル = 新しいコードを入力)`
+                );
+                
+                if (useExisting) {
+                    syncCode = existingCode;
+                } else {
+                    syncCode = await this.promptSyncCode();
+                    if (!syncCode) return;
+                }
+            } else {
+                // 新規の場合
+                syncCode = await this.promptSyncCode();
+                if (!syncCode) return;
+            }
 
-            if (!confirmed) return;
+            // 同期コードを設定
+            const result = window.firebaseSync.setSyncCode(syncCode);
+            if (!result.success) {
+                alert('エラー: ' + result.error);
+                return;
+            }
 
             const success = await window.firebaseSync.enableSync();
             if (!success) {
@@ -1150,10 +1199,10 @@ class QuizManager {
             const firestoreData = await window.firebaseSync.loadCollections();
             if (firestoreData && firestoreData.length > 0) {
                 const useFirestore = confirm(
-                    'クラウドにデータが見つかりました。\n\n' +
+                    '☁️ クラウドにデータが見つかりました\n\n' +
                     `クラウド: ${firestoreData.length}個の問題集\n` +
                     `ローカル: ${this.collections.length}個の問題集\n\n` +
-                    'クラウドのデータを使用しますか？\n（キャンセル = ローカルを優先）'
+                    'クラウドのデータを使用しますか？\n(キャンセル = ローカルを優先してクラウドに上書き)'
                 );
 
                 if (useFirestore) {
@@ -1186,7 +1235,77 @@ class QuizManager {
             });
 
             this.updateSyncUI();
-            alert('✅ クラウド同期を有効にしました！\n\n他のPC・ブラウザでも同じデータが自動的に同期されます。');
+            
+            // 同期コードを表示
+            alert(
+                `✅ クラウド同期を有効にしました！\n\n` +
+                `📱 同期コード: ${syncCode}\n\n` +
+                `他のデバイスでも同じコードを入力すると、\n` +
+                `同じデータにアクセスできます。\n\n` +
+                `💡 ヒント: ヘッダーの同期ボタンを長押しor右クリックで\n` +
+                `コードを確認できます。`
+            );
+        }
+    }
+
+    async promptSyncCode() {
+        const choice = confirm(
+            '🔑 同期コードの設定\n\n' +
+            '【OK】= 新しいコードを生成\n' +
+            '【キャンセル】= 既存のコードを入力\n\n' +
+            '※複数デバイスで同期する場合は、\n' +
+            '  1台目で「生成」→ 2台目で「入力」'
+        );
+
+        if (choice) {
+            // 新しいコードを生成
+            const newCode = window.firebaseSync.generateSyncCode();
+            alert(
+                `🎉 同期コードを生成しました！\n\n` +
+                `📱 同期コード: ${newCode}\n\n` +
+                `このコードを他のデバイスで入力すると、\n` +
+                `同じデータにアクセスできます。\n\n` +
+                `⚠️ このコードを忘れないようにメモしてください！`
+            );
+            return newCode;
+        } else {
+            // 既存のコードを入力
+            const code = prompt(
+                '🔑 同期コードを入力してください\n\n' +
+                '6桁の英数字（例: ABC123）'
+            );
+            
+            if (!code) return null;
+            
+            const upperCode = code.toUpperCase().trim();
+            if (!/^[A-Z0-9]{6}$/.test(upperCode)) {
+                alert('❌ 同期コードは6桁の英数字である必要があります');
+                return null;
+            }
+            
+            return upperCode;
+        }
+    }
+
+    showSyncCode() {
+        const code = window.firebaseSync.getSyncCode();
+        if (!code) {
+            alert('同期コードが設定されていません。\n先に同期を有効にしてください。');
+            return;
+        }
+
+        const copyToClipboard = confirm(
+            `📱 現在の同期コード\n\n` +
+            `${code}\n\n` +
+            `OKを押すとクリップボードにコピーします`
+        );
+
+        if (copyToClipboard) {
+            navigator.clipboard.writeText(code).then(() => {
+                alert('✅ 同期コードをコピーしました！');
+            }).catch(() => {
+                alert(`同期コード: ${code}\n\n手動でコピーしてください。`);
+            });
         }
     }
 
@@ -1222,11 +1341,16 @@ class QuizManager {
         if (this.syncEnabled) {
             btn.classList.add('active');
             icon.textContent = '☁️';
-            status.textContent = '同期ON';
+            const syncCode = window.firebaseSync.getSyncCode();
+            status.textContent = syncCode ? `同期ON (${syncCode})` : '同期ON';
+            btn.title = syncCode 
+                ? `クラウド同期ON\n同期コード: ${syncCode}\n\n右クリックまたは長押しでコードを表示`
+                : 'クラウド同期ON';
         } else {
             btn.classList.remove('active');
             icon.textContent = '☁️';
             status.textContent = '同期OFF';
+            btn.title = 'クラウド同期OFF\nクリックで有効化';
         }
     }
 
