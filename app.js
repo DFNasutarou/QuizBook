@@ -1081,7 +1081,7 @@ class QuizManager {
         const targetId = dropTarget.dataset.quizId;
 
         if (draggedId !== targetId) {
-            this.swapQuizzes(draggedId, targetId);
+            this.insertQuiz(draggedId, targetId);
         }
 
         dropTarget.classList.remove('drag-over');
@@ -1096,7 +1096,7 @@ class QuizManager {
         });
     }
 
-    swapQuizzes(draggedId, targetId) {
+    insertQuiz(draggedId, targetId) {
         if (!this.currentCollection) return;
 
         const draggedIndex = this.currentCollection.quizzes.findIndex(q => q.id === draggedId);
@@ -1104,11 +1104,16 @@ class QuizManager {
 
         if (draggedIndex === -1 || targetIndex === -1) return;
 
-        // 配列の要素を入れ替え
-        [this.currentCollection.quizzes[draggedIndex], this.currentCollection.quizzes[targetIndex]] = 
-        [this.currentCollection.quizzes[targetIndex], this.currentCollection.quizzes[draggedIndex]];
+        // ドラッグした問題を削除
+        const [draggedQuiz] = this.currentCollection.quizzes.splice(draggedIndex, 1);
+        
+        // 新しいターゲットインデックスを計算（削除によってインデックスがずれる可能性がある）
+        const newTargetIndex = draggedIndex < targetIndex ? targetIndex : targetIndex;
+        
+        // ターゲット位置に挿入
+        this.currentCollection.quizzes.splice(newTargetIndex, 0, draggedQuiz);
 
-        console.log(`🔄 問題を移動: ${draggedIndex + 1} ↔ ${targetIndex + 1}`);
+        console.log(`🔄 問題を挿入: ${draggedIndex + 1} → ${newTargetIndex + 1}`);
         
         this.updateQuizList();
         this.saveToLocalStorage();
