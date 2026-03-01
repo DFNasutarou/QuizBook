@@ -580,10 +580,11 @@ class QuizManager {
             return;
         }
 
-        quizzes.forEach(quiz => {
+        quizzes.forEach((quiz, index) => {
             const item = document.createElement('div');
             item.className = 'quiz-item';
             item.dataset.genre = quiz.genre;
+            item.dataset.quizId = quiz.id;
 
             if (this.currentQuiz && quiz.id === this.currentQuiz.id) {
                 item.classList.add('selected');
@@ -619,9 +620,35 @@ class QuizManager {
                 });
             }
 
+            // 矢印ボタンを追加
+            const controlsDiv = document.createElement('div');
+            controlsDiv.className = 'quiz-item-controls';
+
+            const upBtn = document.createElement('button');
+            upBtn.innerHTML = '▲';
+            upBtn.title = '上に移動';
+            upBtn.disabled = index === 0;
+            upBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.moveQuizUp(quiz.id);
+            });
+
+            const downBtn = document.createElement('button');
+            downBtn.innerHTML = '▼';
+            downBtn.title = '下に移動';
+            downBtn.disabled = index === quizzes.length - 1;
+            downBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.moveQuizDown(quiz.id);
+            });
+
+            controlsDiv.appendChild(upBtn);
+            controlsDiv.appendChild(downBtn);
+
             item.appendChild(questionDiv);
             item.appendChild(answerDiv);
             item.appendChild(tagsDiv);
+            item.appendChild(controlsDiv);
 
             // シングルクリックで選択、ダブルクリックで編集
             item.addEventListener('click', () => this.selectQuizOnly(quiz.id));
@@ -999,6 +1026,39 @@ class QuizManager {
         if (!isVisible) {
             this.updateCandidatesSidebar();
         }
+    }
+
+    // ================== 問題の順番入れ替え ==================
+    moveQuizUp(quizId) {
+        if (!this.currentCollection) return;
+
+        const index = this.currentCollection.quizzes.findIndex(q => q.id === quizId);
+        if (index <= 0) return; // 最初の要素または見つからない
+
+        // 配列の要素を入れ替え
+        [this.currentCollection.quizzes[index - 1], this.currentCollection.quizzes[index]] = 
+        [this.currentCollection.quizzes[index], this.currentCollection.quizzes[index - 1]];
+
+        console.log(`⬆️ 問題を上に移動: ${index + 1} → ${index}`);
+        
+        this.updateQuizList();
+        this.saveToLocalStorage();
+    }
+
+    moveQuizDown(quizId) {
+        if (!this.currentCollection) return;
+
+        const index = this.currentCollection.quizzes.findIndex(q => q.id === quizId);
+        if (index === -1 || index >= this.currentCollection.quizzes.length - 1) return; // 最後の要素または見つからない
+
+        // 配列の要素を入れ替え
+        [this.currentCollection.quizzes[index], this.currentCollection.quizzes[index + 1]] = 
+        [this.currentCollection.quizzes[index + 1], this.currentCollection.quizzes[index]];
+
+        console.log(`⬇️ 問題を下に移動: ${index + 1} → ${index + 2}`);
+        
+        this.updateQuizList();
+        this.saveToLocalStorage();
     }
 
     // ================== データ保存・読み込み ==================
