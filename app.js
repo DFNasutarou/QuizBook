@@ -1703,16 +1703,13 @@ class QuizManager {
         reader.onload = (e) => {
             try {
                 const csv = e.target.result;
-                const lines = csv.split('\n');
+                const records = this.parseCsv(csv);
 
                 // ヘッダーをスキップ
                 const quizzes = [];
-                for (let i = 1; i < lines.length; i++) {
-                    const line = lines[i].trim();
-                    if (!line) continue;
-
-                    const parts = this.parseCsvLine(line);
-                    if (parts.length >= 2) {
+                for (let i = 1; i < records.length; i++) {
+                    const parts = records[i];
+                    if (parts.length >= 2 && parts[0]) {
                         const quiz = {
                             id: Date.now().toString() + i,
                             question: parts[0] || '',
@@ -1748,6 +1745,7 @@ class QuizManager {
                 this.saveToLocalStorage();
                 alert(`${quizzes.length}問をインポートしました`);
             } catch (err) {
+                console.error('❌ CSVインポートエラー:', err);
                 alert('CSVの読み込みに失敗しました: ' + err.message);
             }
         };
@@ -1777,6 +1775,55 @@ class QuizManager {
         a.download = `${this.currentCollection.name}_${new Date().toISOString().split('T')[0]}.csv`;
         a.click();
         URL.revokeObjectURL(url);
+    }
+
+    parseCsv(csvText) {
+        const records = [];
+        let currentRecord = [];
+        let currentField = '';
+        let inQuotes = false;
+        
+        for (let i = 0; i < csvText.length; i++) {
+            const char = csvText[i];
+            const nextChar = csvText[i + 1];
+            
+            if (char === '"') {
+                if (inQuotes && nextChar === '"') {
+                    // エスケープされたダブルクォート
+                    currentField += '"';
+                    i++; // 次の文字をスキップ
+                } else {
+                    // クォートの開始または終了
+                    inQuotes = !inQuotes;
+                }
+            } else if (char === ',' && !inQuotes) {
+                // フィールドの終了
+                currentRecord.push(currentField);
+                currentField = '';
+            } else if ((char === '\n' || char === '\r') && !inQuotes) {
+                // レコードの終了
+                if (char === '\r' && nextChar === '\n') {
+                    i++; // \r\nの場合は\nをスキップ
+                }
+                if (currentField || currentRecord.length > 0) {
+                    currentRecord.push(currentField);
+                    records.push(currentRecord);
+                    currentRecord = [];
+                    currentField = '';
+                }
+            } else {
+                // 通常の文字（改行を含む）
+                currentField += char;
+            }
+        }
+        
+        // 最後のフィールドとレコードを追加
+        if (currentField || currentRecord.length > 0) {
+            currentRecord.push(currentField);
+            records.push(currentRecord);
+        }
+        
+        return records;
     }
 
     parseCsvLine(line) {
