@@ -229,7 +229,7 @@ h1 {
     padding: 12px;
     padding-right: 50px; /* 矢印ボタン分のスペース */
     border-bottom: 1px solid var(--border-color);
-    cursor: pointer;
+    cursor: move; /* ドラッグ可能なカーソル */
     transition: background 0.2s;
     position: relative;
 }
@@ -241,6 +241,19 @@ h1 {
 .quiz-item.selected {
     background: #e3f2fd;
     border-left: 4px solid var(--primary-color);
+}
+
+/* ドラッグ中のスタイル */
+.quiz-item.dragging {
+    opacity: 0.5;
+    background: #e0e0e0;
+    cursor: grabbing;
+}
+
+/* ドロップ先のスタイル */
+.quiz-item.drag-over {
+    border-top: 3px solid var(--primary-color);
+    background: #f0f7ff;
 }
 
 .quiz-item-controls {

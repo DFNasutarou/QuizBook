@@ -587,6 +587,8 @@ class QuizManager {
             item.className = 'quiz-item';
             item.dataset.genre = quiz.genre;
             item.dataset.quizId = quiz.id;
+            item.dataset.quizIndex = index; // インデックスを保存
+            item.draggable = true; // ドラッグ可能にする
 
             if (this.currentQuiz && quiz.id === this.currentQuiz.id) {
                 item.classList.add('selected');
@@ -651,6 +653,14 @@ class QuizManager {
             item.appendChild(answerDiv);
             item.appendChild(tagsDiv);
             item.appendChild(controlsDiv);
+
+            // ドラッグ&ドロップイベント
+            item.addEventListener('dragstart', (e) => this.handleDragStart(e));
+            item.addEventListener('dragover', (e) => this.handleDragOver(e));
+            item.addEventListener('drop', (e) => this.handleDrop(e));
+            item.addEventListener('dragenter', (e) => this.handleDragEnter(e));
+            item.addEventListener('dragleave', (e) => this.handleDragLeave(e));
+            item.addEventListener('dragend', (e) => this.handleDragEnd(e));
 
             // シングルクリックで選択、ダブルクリックで編集
             item.addEventListener('click', () => this.selectQuizOnly(quiz.id));
@@ -1030,7 +1040,81 @@ class QuizManager {
         }
     }
 
-    // ================== 問題の順番入れ替え ==================
+    // ================== ドラッグ&ドロップで順番変更 ==================
+    handleDragStart(e) {
+        e.target.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/html', e.target.innerHTML);
+        this.draggedQuizId = e.target.dataset.quizId;
+        console.log('👆 ドラッグ開始:', e.target.dataset.quizId);
+    }
+
+    handleDragOver(e) {
+        if (e.preventDefault) {
+            e.preventDefault(); // ドロップを許可
+        }
+        e.dataTransfer.dropEffect = 'move';
+        return false;
+    }
+
+    handleDragEnter(e) {
+        if (e.target.classList.contains('quiz-item')) {
+            e.target.classList.add('drag-over');
+        }
+    }
+
+    handleDragLeave(e) {
+        if (e.target.classList.contains('quiz-item')) {
+            e.target.classList.remove('drag-over');
+        }
+    }
+
+    handleDrop(e) {
+        if (e.stopPropagation) {
+            e.stopPropagation(); // ブラウザのデフォルト動作を停止
+        }
+
+        const dropTarget = e.target.closest('.quiz-item');
+        if (!dropTarget) return false;
+
+        const draggedId = this.draggedQuizId;
+        const targetId = dropTarget.dataset.quizId;
+
+        if (draggedId !== targetId) {
+            this.swapQuizzes(draggedId, targetId);
+        }
+
+        dropTarget.classList.remove('drag-over');
+        return false;
+    }
+
+    handleDragEnd(e) {
+        e.target.classList.remove('dragging');
+        // 全てのdrag-overクラスを削除
+        document.querySelectorAll('.quiz-item').forEach(item => {
+            item.classList.remove('drag-over');
+        });
+    }
+
+    swapQuizzes(draggedId, targetId) {
+        if (!this.currentCollection) return;
+
+        const draggedIndex = this.currentCollection.quizzes.findIndex(q => q.id === draggedId);
+        const targetIndex = this.currentCollection.quizzes.findIndex(q => q.id === targetId);
+
+        if (draggedIndex === -1 || targetIndex === -1) return;
+
+        // 配列の要素を入れ替え
+        [this.currentCollection.quizzes[draggedIndex], this.currentCollection.quizzes[targetIndex]] = 
+        [this.currentCollection.quizzes[targetIndex], this.currentCollection.quizzes[draggedIndex]];
+
+        console.log(`🔄 問題を移動: ${draggedIndex + 1} ↔ ${targetIndex + 1}`);
+        
+        this.updateQuizList();
+        this.saveToLocalStorage();
+    }
+
+    // ================== 問題の順番入れ替え（ボタン） ==================
     moveQuizUp(quizId) {
         if (!this.currentCollection) return;
 
