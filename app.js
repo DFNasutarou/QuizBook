@@ -24,9 +24,14 @@ class QuizManager {
     }
 
     async init() {
+        console.log('🚀 QuizBook を初期化中...');
+        
         // Firebase初期化
         if (window.firebaseSync) {
             await window.firebaseSync.initialize();
+            console.log('✅ Firebase初期化完了');
+        } else {
+            console.log('⚠️ Firebase Syncが利用できません（オフラインモード）');
         }
 
         this.loadFromLocalStorage();
@@ -34,6 +39,8 @@ class QuizManager {
         this.setupKeyboardShortcuts();
         this.updateUI();
         this.applySettings();
+        
+        console.log('✅ QuizBook の初期化完了');
     }
 
     setupKeyboardShortcuts() {
@@ -192,6 +199,9 @@ class QuizManager {
 
         this.collections.push(collection);
         this.currentCollection = collection;
+        
+        console.log(`📁 新規問題集を作成: "${name}" (ID: ${collection.id})`);
+        
         this.updateUI();
         this.saveToLocalStorage();
     }
@@ -204,8 +214,14 @@ class QuizManager {
 
         if (!confirm(`「${this.currentCollection.name}」を削除しますか？`)) return;
 
+        const deletedName = this.currentCollection.name;
+        const deletedQuizCount = this.currentCollection.quizzes?.length || 0;
+        
         this.collections = this.collections.filter(c => c.id !== this.currentCollection.id);
         this.currentCollection = this.collections.length > 0 ? this.collections[0] : null;
+        
+        console.log(`🗑️ 問題集を削除: "${deletedName}" (${deletedQuizCount}問)`);
+        
         this.updateUI();
         this.saveToLocalStorage();
     }
@@ -253,8 +269,13 @@ class QuizManager {
 
     deleteQuiz() {
         if (!this.currentQuiz || !this.currentCollection) {
-            alert('削除する問題を選択してください');
-            return;
+        const deletedQuestion = this.currentQuiz.question.substring(0, 30);
+        
+        this.currentCollection.quizzes = this.currentCollection.quizzes.filter(q => q.id !== this.currentQuiz.id);
+        this.currentQuiz = null;
+        
+        console.log(`🗑️ 問題を削除: "${deletedQuestion}..." (問題集: ${this.currentCollection.name})`);
+        
         }
 
         if (!confirm('この問題を削除しますか？')) return;
@@ -315,6 +336,10 @@ class QuizManager {
 
         this.currentQuiz = quiz;
         this.updateQuizList();
+        
+        // ログ出力
+        console.log(`💾 問題を保存: "${quiz.question.substring(0, 30)}..." (ID: ${quiz.id}, 問題集: ${this.currentCollection.name})`);
+        
         this.saveToLocalStorage();
 
         // 次の問題に移動または新規問題作成
@@ -978,17 +1003,47 @@ class QuizManager {
 
     // ================== データ保存・読み込み ==================
     saveToLocalStorage() {
-        const data = {
-            collections: this.collections,
-            candidates: this.candidates,
-            settings: this.settings,
-            saved_at: new Date().toISOString()
-        };
-        localStorage.setItem('quizManagerData', JSON.stringify(data));
+        try {
+            const data = {
+                collections: this.collections,
+                candidates: this.candidates,
+                settings: this.settings,
+                saved_at: new Date().toISOString()
+            };
+            
+            const jsonData = JSON.stringify(data);
+            const dataSize = new Blob([jsonData]).size;
+            const dataSizeMB = (dataSize / 1024 / 1024).toFixed(2);
+            
+            // LocalStorageの容量チェック（通常5-10MBが上限）
+            if (dataSize > 4.5 * 1024 * 1024) {
+                console.warn(`⚠️ データサイズが大きいです: ${dataSizeMB}MB`);
+                console.warn('問題集が多すぎる場合、一部を別ファイルに保存することを推奨します');
+            }
+            
+            localStorage.setItem('quizManagerData', jsonData);
+            console.log(`✅ ローカルストレージに保存成功 (${dataSizeMB}MB, ${this.collections.length}問題集, ${this.collections.reduce((sum, c) => sum + (c.quizzes?.length || 0), 0)}問)`);
 
-        // Firestoreにも同期（同期が有効な場合）
-        if (this.syncEnabled && window.firebaseSync && !this.isLoadingFromFirestore) {
-            window.firebaseSync.saveCollections(this.collections);
+            // Firestoreにも同期（同期が有効な場合）
+            if (this.syncEnabled && window.firebaseSync && !this.isLoadingFromFirestore) {
+                window.firebaseSync.saveCollections(this.collections)
+                    .then(() => console.log('✅ Firestoreに同期成功'))
+                    .catch(err => console.error('❌ Firestore同期エラー:', err));
+            }
+        } catch (error) {
+            console.error('❌ ローカルストレージへの保存に失敗:', error);
+            
+            if (error.name === 'QuotaExceededError') {
+                alert(
+                    '⚠️ データ容量の上限に達しました\n\n' +
+                    '対処方法：\n' +
+                    '1. 不要な問題集を削除する\n' +
+                    '2. データをJSONファイルにエクスポートしてバックアップ\n' +
+                    '3. 問題集を複数のファイルに分割する'
+                );
+            } else {
+                alert('データの保存に失敗しました: ' + error.message);
+            }
         }
     }
 
@@ -997,7 +1052,22 @@ class QuizManager {
         if (data) {
             try {
                 const parsed = JSON.parse(data);
-                this.collections = parsed.collections || [];
+                
+                // データの整合性チェック
+                if (!parsed.collections || !Array.isArray(parsed.collections)) {
+                    console.warn('⚠️ データ形式が不正です。初期化します。');
+                    this.collections = [];
+                } else {
+                    this.collections = parsed.collections;
+                    
+                    // 各問題集のquizzesが配列であることを確認
+                    this.collections.forEach(col => {
+                        if (!col.quizzes || !Array.isArray(col.quizzes)) {
+                            console.warn(`⚠️ 問題集「${col.name}」のデータが不正です。修復します。`);
+                            col.quizzes = [];
+                        }
+                    });
+                }
 
                 // 旧形式（文字列配列）を新形式（オブジェクト配列）に変換
                 this.candidates = (parsed.candidates || []).map(c => {
@@ -1014,9 +1084,20 @@ class QuizManager {
                 }
 
                 this.updateCandidatesUI();
+                
+                const totalQuizzes = this.collections.reduce((sum, c) => sum + (c.quizzes?.length || 0), 0);
+                console.log(`✅ ローカルストレージから読み込み成功 (${this.collections.length}問題集, ${totalQuizzes}問${parsed.saved_at ? ', 保存: ' + new Date(parsed.saved_at).toLocaleString('ja-JP') : ''})`);
             } catch (e) {
-                console.error('データの読み込みに失敗しました:', e);
+                console.error('❌ データの読み込みに失敗しました:', e);
+                alert(
+                    '⚠️ データの読み込みに失敗しました\n\n' +
+                    'ブラウザのデータが破損している可能性があります。\n' +
+                    '設定タブから「全データをクリア」を実行するか、\n' +
+                    'バックアップファイルから読み込んでください。'
+                );
             }
+        } else {
+            console.log('ℹ️ 保存されたデータがありません。新規スタートです。');
         }
 
         // 同期状態を復元
@@ -1049,6 +1130,8 @@ class QuizManager {
         const file = event.target.files[0];
         if (!file) return;
 
+        console.log(`📂 ファイルを読み込み中: ${file.name} (${(file.size / 1024).toFixed(2)}KB)`);
+
         const reader = new FileReader();
         reader.onload = (e) => {
             try {
@@ -1060,12 +1143,15 @@ class QuizManager {
                 if (data.collections && Array.isArray(data.collections)) {
                     // 形式1: { collections: [...] }
                     collections = data.collections;
+                    console.log('✅ 形式1を検出: { collections: [...] }');
                 } else if (data.name && data.quizzes) {
                     // 形式2: 単一の問題集 { name: "...", quizzes: [...] }
                     collections = [data];
+                    console.log('✅ 形式2を検出: 単一の問題集');
                 } else if (Array.isArray(data)) {
                     // 形式3: 問題集の配列 [...]
                     collections = data;
+                    console.log('✅ 形式3を検出: 問題集の配列');
                 } else {
                     throw new Error('サポートされていないファイル形式です');
                 }
@@ -1107,21 +1193,26 @@ class QuizManager {
 
                 if (confirm('既存のデータを上書きしますか？（キャンセルで追加モード）')) {
                     this.collections = collections;
+                    console.log('📝 上書きモード: 既存データを置換');
                 } else {
                     // 追加モード
                     this.collections = this.collections.concat(collections);
+                    console.log('➕ 追加モード: 既存データに追加');
                 }
 
                 if (this.collections.length > 0) {
                     this.currentCollection = this.collections[0];
                 }
 
+                const totalQuizzes = collections.reduce((sum, col) => sum + col.quizzes.length, 0);
+                console.log(`✅ ファイル読み込み完了: ${collections.length}問題集, ${totalQuizzes}問`);
+
                 this.updateUI();
                 this.saveToLocalStorage();
-                alert(`読み込みが完了しました（${collections.length}個の問題集、合計${collections.reduce((sum, col) => sum + col.quizzes.length, 0)}問）`);
+                alert(`読み込みが完了しました（${collections.length}個の問題集、合計${totalQuizzes}問）`);
             } catch (err) {
+                console.error('❌ ファイルの読み込みに失敗:', err);
                 alert('ファイルの読み込みに失敗しました: ' + err.message);
-                console.error('Load error:', err);
             }
         };
         reader.readAsText(file);
@@ -1231,7 +1322,7 @@ class QuizManager {
                 this.updateUI();
                 this.saveToLocalStorage();
                 this.isLoadingFromFirestore = false;
-                console.log('Data synced from cloud');
+                console.log('🔄 クラウドからデータを同期しました');
             });
 
             this.updateSyncUI();
@@ -1327,7 +1418,7 @@ class QuizManager {
             this.updateUI();
             this.saveToLocalStorage();
             this.isLoadingFromFirestore = false;
-            console.log('Data synced from cloud (silent)');
+            console.log('🔄 クラウドからデータを同期しました（サイレント）');
         });
 
         this.updateSyncUI();
@@ -1502,10 +1593,16 @@ class QuizManager {
         if (!confirm('全てのデータを削除しますか？この操作は元に戻せません。')) return;
         if (!confirm('本当によろしいですか？')) return;
 
+        const collectionCount = this.collections.length;
+        const totalQuizzes = this.collections.reduce((sum, c) => sum + (c.quizzes?.length || 0), 0);
+
         this.collections = [];
         this.currentCollection = null;
         this.currentQuiz = null;
         localStorage.removeItem('quizManagerData');
+        
+        console.log(`🗑️ 全データを削除しました (${collectionCount}問題集, ${totalQuizzes}問)`);
+        
         this.updateUI();
         alert('全てのデータを削除しました');
     }
