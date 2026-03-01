@@ -107,6 +107,7 @@ class QuizManager {
 
         // 問題集管理
         document.getElementById('newCollectionBtn').addEventListener('click', () => this.newCollection());
+        document.getElementById('renameCollectionBtn').addEventListener('click', () => this.renameCollection());
         document.getElementById('deleteCollectionBtn').addEventListener('click', () => this.deleteCollection());
         document.getElementById('collectionList').addEventListener('change', (e) => this.selectCollection(e.target.value));
         document.getElementById('collectionList').addEventListener('dblclick', (e) => this.startQuizFromCollection());
@@ -203,6 +204,25 @@ class QuizManager {
         this.currentCollection = collection;
         
         console.log(`📁 新規問題集を作成: "${name}" (ID: ${collection.id})`);
+        
+        this.updateUI();
+        this.saveToLocalStorage();
+    }
+
+    renameCollection() {
+        if (!this.currentCollection) {
+            alert('名前を変更する問題集を選択してください');
+            return;
+        }
+
+        const oldName = this.currentCollection.name;
+        const newName = prompt('新しい名前を入力してください:', oldName);
+        
+        if (!newName || newName === oldName) return;
+
+        this.currentCollection.name = newName;
+        
+        console.log(`✏️ 問題集の名前を変更: "${oldName}" → "${newName}"`);
         
         this.updateUI();
         this.saveToLocalStorage();
