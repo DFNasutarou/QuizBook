@@ -1002,6 +1002,31 @@ class QuizManager {
     }
 
     // ================== データ保存・読み込み ==================
+    showNotification(message, type = 'success') {
+        const notification = document.createElement('div');
+        notification.className = 'copy-notification';
+        
+        const colors = {
+            success: '#4CAF50',
+            info: '#2196F3',
+            warning: '#FF9800',
+            error: '#f44336'
+        };
+        
+        notification.innerHTML = `
+            <div style="background: ${colors[type]}; color: white; padding: 15px 20px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); max-width: 400px;">
+                ${message}
+            </div>
+        `;
+        notification.style.cssText = 'position: fixed; top: 20px; right: 20px; z-index: 10000; animation: slideIn 0.3s;';
+        document.body.appendChild(notification);
+        
+        setTimeout(() => {
+            notification.style.animation = 'slideOut 0.3s';
+            setTimeout(() => notification.remove(), 300);
+        }, 3000);
+    }
+
     saveToLocalStorage() {
         try {
             const data = {
@@ -1026,9 +1051,16 @@ class QuizManager {
 
             // Firestoreにも同期（同期が有効な場合）
             if (this.syncEnabled && window.firebaseSync && !this.isLoadingFromFirestore) {
+                const totalQuizzes = this.collections.reduce((sum, c) => sum + (c.quizzes?.length || 0), 0);
                 window.firebaseSync.saveCollections(this.collections)
-                    .then(() => console.log('✅ Firestoreに同期成功'))
-                    .catch(err => console.error('❌ Firestore同期エラー:', err));
+                    .then(() => {
+                        console.log('✅ Firestoreに同期成功');
+                        this.showNotification(`<strong>☁️ クラウドに保存しました</strong><br><small>${this.collections.length}問題集・${totalQuizzes}問を同期</small>`, 'success');
+                    })
+                    .catch(err => {
+                        console.error('❌ Firestore同期エラー:', err);
+                        this.showNotification(`<strong>⚠️ クラウド同期に失敗</strong><br><small>${err.message}</small>`, 'error');
+                    });
             }
         } catch (error) {
             console.error('❌ ローカルストレージへの保存に失敗:', error);
