@@ -19,6 +19,8 @@ class QuizManager {
         };
         this.syncEnabled = false;  // 同期状態
         this.isLoadingFromFirestore = false;  // Firestoreからの読み込み中フラグ
+        this.cloudSyncTimer = null;  // クラウド同期の遅延タイマー
+        this.cloudSyncDelay = 10000;  // クラウド同期の遅延時間（10秒）
 
         this.init();
     }
@@ -1062,6 +1064,57 @@ class QuizManager {
     }
 
     // ================== データ保存・読み込み ==================
+    scheduleCloudSync() {
+        // 既存のタイマーをキャンセル
+        if (this.cloudSyncTimer) {
+            clearTimeout(this.cloudSyncTimer);
+            console.log('⏱️ クラウド同期タイマーをリセット');
+        }
+
+        console.log(`⏱️ ${this.cloudSyncDelay / 1000}秒後にクラウド同期予定`);
+
+        // 新しいタイマーを設定
+        this.cloudSyncTimer = setTimeout(() => {
+            const totalQuizzes = this.collections.reduce((sum, c) => sum + (c.quizzes?.length || 0), 0);
+            window.firebaseSync.saveCollections(this.collections)
+                .then(() => {
+                    console.log('✅ Firestoreに同期成功');
+                    this.showNotification(`<strong>☁️ クラウドに保存しました</strong><br><small>${this.collections.length}問題集・${totalQuizzes}問を同期</small>`, 'success');
+                })
+                .catch(err => {
+                    console.error('❌ Firestore同期エラー:', err);
+                    this.showNotification(`<strong>⚠️ クラウド同期に失敗</strong><br><small>${err.message}</small>`, 'error');
+                });
+            this.cloudSyncTimer = null;
+        }, this.cloudSyncDelay);
+    }
+
+    // ================== データ保存・読み込み ==================
+    scheduleCloudSync() {
+        // 既存のタイマーをキャンセル
+        if (this.cloudSyncTimer) {
+            clearTimeout(this.cloudSyncTimer);
+            console.log('⏱️ クラウド同期タイマーをリセット');
+        }
+
+        console.log(`⏱️ ${this.cloudSyncDelay / 1000}秒後にクラウド同期予定`);
+
+        // 新しいタイマーを設定
+        this.cloudSyncTimer = setTimeout(() => {
+            const totalQuizzes = this.collections.reduce((sum, c) => sum + (c.quizzes?.length || 0), 0);
+            window.firebaseSync.saveCollections(this.collections)
+                .then(() => {
+                    console.log('✅ Firestoreに同期成功');
+                    this.showNotification(`<strong>☁️ クラウドに保存しました</strong><br><small>${this.collections.length}問題集・${totalQuizzes}問を同期</small>`, 'success');
+                })
+                .catch(err => {
+                    console.error('❌ Firestore同期エラー:', err);
+                    this.showNotification(`<strong>⚠️ クラウド同期に失敗</strong><br><small>${err.message}</small>`, 'error');
+                });
+            this.cloudSyncTimer = null;
+        }, this.cloudSyncDelay);
+    }
+
     showNotification(message, type = 'success') {
         const notification = document.createElement('div');
         notification.className = 'copy-notification';
@@ -1109,18 +1162,9 @@ class QuizManager {
             localStorage.setItem('quizManagerData', jsonData);
             console.log(`✅ ローカルストレージに保存成功 (${dataSizeMB}MB, ${this.collections.length}問題集, ${this.collections.reduce((sum, c) => sum + (c.quizzes?.length || 0), 0)}問)`);
 
-            // Firestoreにも同期（同期が有効な場合）
+            // Firestoreにも同期（同期が有効な場合）- 10秒遅延
             if (this.syncEnabled && window.firebaseSync && !this.isLoadingFromFirestore) {
-                const totalQuizzes = this.collections.reduce((sum, c) => sum + (c.quizzes?.length || 0), 0);
-                window.firebaseSync.saveCollections(this.collections)
-                    .then(() => {
-                        console.log('✅ Firestoreに同期成功');
-                        this.showNotification(`<strong>☁️ クラウドに保存しました</strong><br><small>${this.collections.length}問題集・${totalQuizzes}問を同期</small>`, 'success');
-                    })
-                    .catch(err => {
-                        console.error('❌ Firestore同期エラー:', err);
-                        this.showNotification(`<strong>⚠️ クラウド同期に失敗</strong><br><small>${err.message}</small>`, 'error');
-                    });
+                this.scheduleCloudSync();
             }
         } catch (error) {
             console.error('❌ ローカルストレージへの保存に失敗:', error);
