@@ -20,8 +20,6 @@ class QuizManager {
         };
         this.syncEnabled = false;  // 同期状態
         this.isLoadingFromFirestore = false;  // Firestoreからの読み込み中フラグ
-        this.cloudSyncTimer = null;  // クラウド同期の遅延タイマー
-        this.cloudSyncDelay = 10000;  // クラウド同期の遅延時間（10秒）
 
         this.init();
     }
@@ -83,6 +81,7 @@ class QuizManager {
 
         // クラウド同期
         document.getElementById('syncToggleBtn').addEventListener('click', () => this.toggleSync());
+        document.getElementById('cloudDownloadBtn').addEventListener('click', () => this.downloadFromCloud());
         
         // 同期コード表示（右クリック or 長押し）
         const syncBtn = document.getElementById('syncToggleBtn');
@@ -1190,56 +1189,67 @@ class QuizManager {
     }
 
     // ================== データ保存・読み込み ==================
-    scheduleCloudSync() {
-        // 既存のタイマーをキャンセル
-        if (this.cloudSyncTimer) {
-            clearTimeout(this.cloudSyncTimer);
-            console.log('⏱️ クラウド同期タイマーをリセット');
+    // ================== クラウド同期（手動モード）==================
+    async uploadToCloud() {
+        if (!this.syncEnabled || !window.firebaseSync) return;
+        
+        const totalQuizzes = this.collections.reduce((sum, c) => sum + (c.quizzes?.length || 0), 0);
+        console.log(`📤 クラウドにアップロード中... (${this.collections.length}問題集, ${totalQuizzes}問)`);
+        
+        try {
+            await window.firebaseSync.saveCollections(this.collections);
+            console.log('✅ クラウドにアップロード成功');
+            this.showNotification(`<strong>☁️ クラウドに保存しました</strong><br><small>${this.collections.length}問題集・${totalQuizzes}問を同期</small>`, 'success');
+        } catch (err) {
+            console.error('❌ クラウドアップロードエラー:', err);
+            this.showNotification(`<strong>⚠️ クラウド保存に失敗</strong><br><small>${err.message}</small>`, 'error');
         }
+    }
 
-        console.log(`⏱️ ${this.cloudSyncDelay / 1000}秒後にクラウド同期予定`);
-
-        // 新しいタイマーを設定
-        this.cloudSyncTimer = setTimeout(() => {
-            const totalQuizzes = this.collections.reduce((sum, c) => sum + (c.quizzes?.length || 0), 0);
-            window.firebaseSync.saveCollections(this.collections)
-                .then(() => {
-                    console.log('✅ Firestoreに同期成功');
-                    this.showNotification(`<strong>☁️ クラウドに保存しました</strong><br><small>${this.collections.length}問題集・${totalQuizzes}問を同期</small>`, 'success');
-                })
-                .catch(err => {
-                    console.error('❌ Firestore同期エラー:', err);
-                    this.showNotification(`<strong>⚠️ クラウド同期に失敗</strong><br><small>${err.message}</small>`, 'error');
-                });
-            this.cloudSyncTimer = null;
-        }, this.cloudSyncDelay);
+    async downloadFromCloud() {
+        if (!this.syncEnabled || !window.firebaseSync) {
+            alert('クラウド同期が有効になっていません');
+            return;
+        }
+        
+        const confirmDownload = confirm(
+            '☁️ クラウドからデータをダウンロードしますか？\n\n' +
+            '⚠️ ローカルの変更は上書きされます。\n' +
+            '(保存していない変更はクラウドにアップロードされません)'
+        );
+        
+        if (!confirmDownload) return;
+        
+        console.log('📥 クラウドからダウンロード中...');
+        
+        try {
+            const firestoreData = await window.firebaseSync.loadCollections();
+            
+            if (firestoreData && firestoreData.length > 0) {
+                this.isLoadingFromFirestore = true;
+                this.collections = firestoreData;
+                if (this.collections.length > 0) {
+                    this.currentCollection = this.collections[0];
+                }
+                this.updateUI();
+                this.saveToLocalStorage();
+                this.isLoadingFromFirestore = false;
+                
+                const totalQuizzes = this.collections.reduce((sum, c) => sum + (c.quizzes?.length || 0), 0);
+                this.showNotification(
+                    `<strong>☁️ クラウドから取得しました</strong><br><small>${this.collections.length}問題集・${totalQuizzes}問をダウンロード</small>`,
+                    'success'
+                );
+            } else {
+                alert('クラウドにデータが見つかりませんでした');
+            }
+        } catch (err) {
+            console.error('❌ クラウドダウンロードエラー:', err);
+            this.showNotification(`<strong>⚠️ ダウンロードに失敗</strong><br><small>${err.message}</small>`, 'error');
+        }
     }
 
     // ================== データ保存・読み込み ==================
-    scheduleCloudSync() {
-        // 既存のタイマーをキャンセル
-        if (this.cloudSyncTimer) {
-            clearTimeout(this.cloudSyncTimer);
-            console.log('⏱️ クラウド同期タイマーをリセット');
-        }
-
-        console.log(`⏱️ ${this.cloudSyncDelay / 1000}秒後にクラウド同期予定`);
-
-        // 新しいタイマーを設定
-        this.cloudSyncTimer = setTimeout(() => {
-            const totalQuizzes = this.collections.reduce((sum, c) => sum + (c.quizzes?.length || 0), 0);
-            window.firebaseSync.saveCollections(this.collections)
-                .then(() => {
-                    console.log('✅ Firestoreに同期成功');
-                    this.showNotification(`<strong>☁️ クラウドに保存しました</strong><br><small>${this.collections.length}問題集・${totalQuizzes}問を同期</small>`, 'success');
-                })
-                .catch(err => {
-                    console.error('❌ Firestore同期エラー:', err);
-                    this.showNotification(`<strong>⚠️ クラウド同期に失敗</strong><br><small>${err.message}</small>`, 'error');
-                });
-            this.cloudSyncTimer = null;
-        }, this.cloudSyncDelay);
-    }
 
     showNotification(message, type = 'success') {
         const notification = document.createElement('div');
@@ -1289,9 +1299,9 @@ class QuizManager {
             localStorage.setItem('quizManagerData', jsonData);
             console.log(`✅ ローカルストレージに保存成功 (${dataSizeMB}MB, ${this.collections.length}問題集, ${this.collections.reduce((sum, c) => sum + (c.quizzes?.length || 0), 0)}問)`);
 
-            // Firestoreにも同期（同期が有効な場合）- 10秒遅延
+            // Firestoreにも同期（同期が有効な場合）- 即座にアップロード
             if (this.syncEnabled && window.firebaseSync && !this.isLoadingFromFirestore) {
-                this.scheduleCloudSync();
+                this.uploadToCloud();
             }
         } catch (error) {
             console.error('❌ ローカルストレージへの保存に失敗:', error);
@@ -1579,29 +1589,18 @@ class QuizManager {
                 await window.firebaseSync.saveCollections(this.collections);
             }
 
-            // リアルタイム同期を開始
-            window.firebaseSync.startRealtimeSync((collections) => {
-                // 他のデバイスからの変更を受信
-                this.isLoadingFromFirestore = true;
-                this.collections = collections;
-                if (this.collections.length > 0 && !this.currentCollection) {
-                    this.currentCollection = this.collections[0];
-                }
-                this.updateUI();
-                this.saveToLocalStorage();
-                this.isLoadingFromFirestore = false;
-                console.log('🔄 クラウドからデータを同期しました');
-            });
-
             this.updateSyncUI();
             
             // 同期コードを表示
             alert(
                 `✅ クラウド同期を有効にしました！\n\n` +
                 `📱 同期コード: ${syncCode}\n\n` +
+                `【同期の動作】\n` +
+                `・保存時に自動的にクラウドにアップロード\n` +
+                `・ダウンロードは「📥ダウンロード」ボタンを押す\n\n` +
                 `他のデバイスでも同じコードを入力すると、\n` +
                 `同じデータにアクセスできます。\n\n` +
-                `💡 ヒント: ヘッダーの同期ボタンを長押しor右クリックで\n` +
+                `💡 ヒント: 同期ボタンを長押しor右クリックで\n` +
                 `コードを確認できます。`
             );
         }
@@ -1655,18 +1654,6 @@ class QuizManager {
             this.updateSyncUI();
             return;
         }
-
-        // リアルタイム同期（読み取りのみ）
-        window.firebaseSync.startRealtimeSync((collections) => {
-            this.isLoadingFromFirestore = true;
-            this.collections = collections;
-            if (this.collections.length > 0 && !this.currentCollection) {
-                this.currentCollection = this.collections[0];
-            }
-            this.updateUI();
-            // saveToLocalStorage は isViewMode ガードで自動的にスキップされる
-            this.isLoadingFromFirestore = false;
-        });
 
         this.updateSyncUI();
     }
@@ -1754,19 +1741,6 @@ class QuizManager {
             console.log('✅ 起動時にクラウドの最新データを読み込みました');
         }
 
-        // リアルタイム同期を開始（以降の変更を受信）
-        window.firebaseSync.startRealtimeSync((collections) => {
-            this.isLoadingFromFirestore = true;
-            this.collections = collections;
-            if (this.collections.length > 0 && !this.currentCollection) {
-                this.currentCollection = this.collections[0];
-            }
-            this.updateUI();
-            this.saveToLocalStorage();
-            this.isLoadingFromFirestore = false;
-            console.log('🔄 クラウドからデータを同期しました（サイレント）');
-        });
-
         this.updateSyncUI();
     }
 
@@ -1774,6 +1748,7 @@ class QuizManager {
         const btn = document.getElementById('syncToggleBtn');
         const icon = document.getElementById('syncIcon');
         const status = document.getElementById('syncStatus');
+        const downloadBtn = document.getElementById('cloudDownloadBtn');
 
         if (this.syncEnabled) {
             btn.classList.add('active');
@@ -1783,11 +1758,21 @@ class QuizManager {
             btn.title = syncCode 
                 ? `クラウド同期ON\n同期コード: ${syncCode}\n\n右クリックまたは長押しでコードを表示`
                 : 'クラウド同期ON';
+            
+            // ダウンロードボタンを表示
+            if (downloadBtn) {
+                downloadBtn.style.display = '';
+            }
         } else {
             btn.classList.remove('active');
             icon.textContent = '☁️';
             status.textContent = '同期OFF';
             btn.title = 'クラウド同期OFF\nクリックで有効化';
+            
+            // ダウンロードボタンを非表示
+            if (downloadBtn) {
+                downloadBtn.style.display = 'none';
+            }
         }
     }
 
