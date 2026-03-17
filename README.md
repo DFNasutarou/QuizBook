@@ -6,6 +6,8 @@
 
 **[👉 今すぐ使う（GitHub Pages）](https://dfnasutarou.github.io/QuizBook/)**
 
+**[👁 閲覧モードで開く](https://dfnasutarou.github.io/QuizBook/?view)**（データを端末に残さない・編集不可）
+
 ブラウザから直接アクセスして、すぐに使い始められます！
 
 ## ✨ 機能
