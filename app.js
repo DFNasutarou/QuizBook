@@ -1729,7 +1729,21 @@ class QuizManager {
 
         this.syncEnabled = true;
 
-        // リアルタイム同期を開始
+        // 起動時にクラウドの最新データを明示的に取得してからUIを更新
+        const firestoreData = await window.firebaseSync.loadCollections();
+        if (firestoreData && firestoreData.length > 0) {
+            this.isLoadingFromFirestore = true;
+            this.collections = firestoreData;
+            if (this.collections.length > 0) {
+                this.currentCollection = this.collections[0];
+            }
+            this.updateUI();
+            this.saveToLocalStorage();
+            this.isLoadingFromFirestore = false;
+            console.log('✅ 起動時にクラウドの最新データを読み込みました');
+        }
+
+        // リアルタイム同期を開始（以降の変更を受信）
         window.firebaseSync.startRealtimeSync((collections) => {
             this.isLoadingFromFirestore = true;
             this.collections = collections;
