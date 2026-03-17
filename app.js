@@ -2184,17 +2184,14 @@ ${answer}
 
 簡潔かつ具体的に回答してください。`;
 
-        // LocalStorageに保存（拡張機能が読み取る）
-        try {
-            localStorage.setItem('quizFactCheckPrompt', prompt);
-
-            // 成功通知
+        // クリップボードにコピー
+        navigator.clipboard.writeText(prompt).then(() => {
             const notification = document.createElement('div');
             notification.className = 'copy-notification';
             notification.innerHTML = `
                 <div style="background: #4CAF50; color: white; padding: 15px 20px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); max-width: 400px;">
-                    <strong>🚀 自動送信します！</strong><br>
-                    <small>Claude.aiが開いて自動的に質問を送信します</small>
+                    <strong>📋 質問をコピーしました！</strong><br>
+                    <small>Claude.aiが開くので、Ctrl+V で貼り付けてください</small>
                 </div>
             `;
             notification.style.cssText = 'position: fixed; top: 20px; right: 20px; z-index: 10000; animation: slideIn 0.3s;';
@@ -2205,54 +2202,28 @@ ${answer}
                 setTimeout(() => notification.remove(), 300);
             }, 3000);
 
-            // URLパラメータとして質問を渡す（エンコード）
-            const encodedPrompt = encodeURIComponent(prompt);
-            const url = `https://claude.ai/new?autoPrompt=${encodedPrompt}`;
-
             // Claude.aiを開く
-            window.open(url, '_blank');
-        } catch (err) {
-            console.error('エラー:', err);
-            // 拡張機能がない場合は従来通りクリップボードにコピー
-            navigator.clipboard.writeText(prompt).then(() => {
-                const notification = document.createElement('div');
-                notification.className = 'copy-notification';
-                notification.innerHTML = `
-                    <div style="background: #FF9800; color: white; padding: 15px 20px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); max-width: 400px;">
-                        <strong>📋 クリップボードにコピーしました</strong><br>
-                        <small>Chrome拡張機能をインストールすると自動送信できます</small><br>
-                        <small style="margin-top: 5px; display: block;">Claude.aiで Ctrl+V → Enter</small>
-                    </div>
-                `;
-                notification.style.cssText = 'position: fixed; top: 20px; right: 20px; z-index: 10000; animation: slideIn 0.3s;';
-                document.body.appendChild(notification);
+            window.open('https://claude.ai/new', '_blank');
+        }).catch(err => {
+            console.error('クリップボードへのコピーに失敗:', err);
 
-                setTimeout(() => {
-                    notification.style.animation = 'slideOut 0.3s';
-                    setTimeout(() => notification.remove(), 300);
-                }, 4000);
+            // フォールバック: 手動コピー
+            const textarea = document.createElement('textarea');
+            textarea.value = prompt;
+            textarea.style.cssText = 'position: fixed; top: 0; left: 0; width: 1px; height: 1px; opacity: 0;';
+            document.body.appendChild(textarea);
+            textarea.select();
 
+            try {
+                document.execCommand('copy');
+                alert('質問をクリップボードにコピーしました！\nClaude.aiが開いたら、貼り付け（Ctrl+V）してください。');
                 window.open('https://claude.ai/new', '_blank');
-            }).catch(err => {
-                console.error('クリップボードへのコピーに失敗:', err);
+            } catch (err2) {
+                alert('クリップボードへのコピーに失敗しました。\n以下の質問文を手動でコピーしてください：\n\n' + prompt);
+            }
 
-                const textarea = document.createElement('textarea');
-                textarea.value = prompt;
-                textarea.style.cssText = 'position: fixed; top: 0; left: 0; width: 1px; height: 1px; opacity: 0;';
-                document.body.appendChild(textarea);
-                textarea.select();
-
-                try {
-                    document.execCommand('copy');
-                    alert('質問をクリップボードにコピーしました！\nClaude.aiが開いたら、貼り付け（Ctrl+V）してください。');
-                    window.open('https://claude.ai/new', '_blank');
-                } catch (err2) {
-                    alert('クリップボードへのコピーに失敗しました。\n以下の質問文を手動でコピーしてください：\n\n' + prompt);
-                }
-
-                document.body.removeChild(textarea);
-            });
-        }
+            document.body.removeChild(textarea);
+        });
     }
 }
 
