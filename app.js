@@ -1475,7 +1475,7 @@ class QuizManager {
     // ================== クラウド同期 ==================
     async toggleSync() {
         if (this.isViewMode) {
-            alert('閲覧モードではクラウド同期を使用できません。');
+            await this.toggleViewModeSync();
             return;
         }
         if (this.syncEnabled) {
@@ -1594,6 +1594,70 @@ class QuizManager {
                 `コードを確認できます。`
             );
         }
+    }
+
+    async toggleViewModeSync() {
+        if (this.syncEnabled) {
+            // 同期を切断
+            this.syncEnabled = false;
+            if (window.firebaseSync) window.firebaseSync.disableSync();
+            this.updateSyncUI();
+            return;
+        }
+
+        if (!window.firebaseSync) {
+            alert('Firebase接続に失敗しました。');
+            return;
+        }
+
+        // 同期コードを入力させる（閲覧専用）
+        const code = prompt('同期コードを入力してください（閲覧のみ・書き込みはしません）:');
+        if (!code) return;
+
+        const result = window.firebaseSync.setSyncCode(code);
+        if (!result.success) {
+            alert('エラー: ' + result.error);
+            return;
+        }
+
+        const success = await window.firebaseSync.enableSync();
+        if (!success) {
+            alert('同期の有効化に失敗しました。');
+            return;
+        }
+
+        this.syncEnabled = true;
+
+        // Firestoreからデータを読み込む（書き込みはしない）
+        const firestoreData = await window.firebaseSync.loadCollections();
+        if (firestoreData && firestoreData.length > 0) {
+            this.isLoadingFromFirestore = true;
+            this.collections = firestoreData;
+            this.currentCollection = this.collections[0];
+            this.updateUI();
+            this.isLoadingFromFirestore = false;
+            console.log('✅ 閲覧モード: クラウドからデータを読み込みました（書き込みなし）');
+        } else {
+            alert('クラウドにデータが見つかりませんでした。');
+            this.syncEnabled = false;
+            window.firebaseSync.disableSync();
+            this.updateSyncUI();
+            return;
+        }
+
+        // リアルタイム同期（読み取りのみ）
+        window.firebaseSync.startRealtimeSync((collections) => {
+            this.isLoadingFromFirestore = true;
+            this.collections = collections;
+            if (this.collections.length > 0 && !this.currentCollection) {
+                this.currentCollection = this.collections[0];
+            }
+            this.updateUI();
+            // saveToLocalStorage は isViewMode ガードで自動的にスキップされる
+            this.isLoadingFromFirestore = false;
+        });
+
+        this.updateSyncUI();
     }
 
     async promptSyncCode() {
@@ -1900,7 +1964,6 @@ class QuizManager {
         // 非表示にするボタン（編集・保存系）
         const hideIds = [
             'saveBtn', 'importCsvBtn',
-            'syncToggleBtn',
             'newCollectionBtn', 'renameCollectionBtn', 'deleteCollectionBtn',
             'newQuizBtn', 'deleteQuizBtn',
             'clearDataBtn'
