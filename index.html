@@ -32,6 +32,7 @@
         <div class="tabs">
             <button class="tab-btn active" data-tab="manage">問題集管理</button>
             <button class="tab-btn" data-tab="edit">問題編集</button>
+            <button class="tab-btn" data-tab="move">問題移動</button>
             <button class="tab-btn" data-tab="candidates">候補リスト</button>
             <button class="tab-btn" data-tab="quiz">出題</button>
             <button class="tab-btn" data-tab="settings">設定</button>
@@ -69,6 +70,47 @@
                     <div id="quizList" class="quiz-list"></div>
                 </div>
             </div>
+        </div>
+
+        <!-- 問題移動タブ -->
+        <div id="move-tab" class="tab-content">
+            <div class="move-panel">
+                <div class="move-collection-panel">
+                    <div class="move-collection-header">
+                        <h3>移動元</h3>
+                        <select id="moveSourceCollection" class="move-collection-select">
+                            <option value="">問題集を選択...</option>
+                        </select>
+                        <span class="move-count" id="moveSourceCount"></span>
+                    </div>
+                    <div class="move-filter">
+                        <input type="text" id="moveSourceSearch" placeholder="検索...">
+                    </div>
+                    <div id="moveSourceList" class="quiz-list move-quiz-list"></div>
+                </div>
+
+                <div class="move-actions">
+                    <button id="moveRightBtn" class="btn btn-primary move-btn" title="選択した問題を右へ移動">→ 移動</button>
+                    <button id="moveLeftBtn" class="btn btn-primary move-btn" title="選択した問題を左へ移動">← 移動</button>
+                    <button id="copyRightBtn" class="btn btn-secondary move-btn" title="選択した問題を右へコピー">→ コピー</button>
+                    <button id="copyLeftBtn" class="btn btn-secondary move-btn" title="選択した問題を左へコピー">← コピー</button>
+                </div>
+
+                <div class="move-collection-panel">
+                    <div class="move-collection-header">
+                        <h3>移動先</h3>
+                        <select id="moveDestCollection" class="move-collection-select">
+                            <option value="">問題集を選択...</option>
+                        </select>
+                        <span class="move-count" id="moveDestCount"></span>
+                    </div>
+                    <div class="move-filter">
+                        <input type="text" id="moveDestSearch" placeholder="検索...">
+                    </div>
+                    <div id="moveDestList" class="quiz-list move-quiz-list"></div>
+                </div>
+            </div>
+            <p class="move-hint">💡 Ctrl/Cmd クリックで複数選択、Shift クリックで範囲選択</p>
         </div>
 
         <!-- 問題編集タブ -->

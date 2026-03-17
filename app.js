@@ -174,12 +174,22 @@ class QuizManager {
         // ファイル入力
         document.getElementById('fileInput').addEventListener('change', (e) => this.handleFileLoad(e));
         document.getElementById('csvFileInput').addEventListener('change', (e) => this.handleCsvImport(e));
+
+        // 問題移動タブ
+        document.getElementById('moveSourceCollection').addEventListener('change', (e) => this.onMoveCollectionChange('source', e.target.value));
+        document.getElementById('moveDestCollection').addEventListener('change', (e) => this.onMoveCollectionChange('dest', e.target.value));
+        document.getElementById('moveSourceSearch').addEventListener('input', () => this.renderMoveList('source'));
+        document.getElementById('moveDestSearch').addEventListener('input', () => this.renderMoveList('dest'));
+        document.getElementById('moveRightBtn').addEventListener('click', () => this.moveQuizzes('source', 'dest'));
+        document.getElementById('moveLeftBtn').addEventListener('click', () => this.moveQuizzes('dest', 'source'));
+        document.getElementById('copyRightBtn').addEventListener('click', () => this.copyQuizzes('source', 'dest'));
+        document.getElementById('copyLeftBtn').addEventListener('click', () => this.copyQuizzes('dest', 'source'));
     }
 
     // ================== タブ切り替え ==================
     switchTab(tabName) {
-        // 閲覧モードでは編集・候補リストタブへの遷移をブロック
-        if (this.isViewMode && (tabName === 'edit' || tabName === 'candidates')) return;
+        // 閲覧モードでは編集・候補リスト・移動タブへの遷移をブロック
+        if (this.isViewMode && (tabName === 'edit' || tabName === 'candidates' || tabName === 'move')) return;
 
         // タブボタンの切り替え
         document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -558,6 +568,7 @@ class QuizManager {
         this.updateQuizList();
         this.updateGenreFilters();
         this.updateQuizCollectionCheckboxes();
+        this.updateMoveCollectionSelects();
     }
 
     updateCollectionList() {
@@ -1971,6 +1982,148 @@ class QuizManager {
         this.saveToLocalStorage();
     }
 
+    // ================== 問題移動タブ ==================
+    _moveState = {
+        sourceId: null,
+        destId: null,
+        sourceSelected: new Set(),
+        destSelected: new Set()
+    };
+
+    updateMoveCollectionSelects() {
+        ['moveSourceCollection', 'moveDestCollection'].forEach(id => {
+            const sel = document.getElementById(id);
+            const current = sel.value;
+            sel.innerHTML = '<option value="">問題集を選択...</option>';
+            this.collections.forEach(col => {
+                const opt = document.createElement('option');
+                opt.value = col.id;
+                opt.textContent = `${col.name} (${col.quizzes.length}問)`;
+                sel.appendChild(opt);
+            });
+            if (current) sel.value = current;
+        });
+        this.renderMoveList('source');
+        this.renderMoveList('dest');
+    }
+
+    onMoveCollectionChange(side, colId) {
+        if (side === 'source') {
+            this._moveState.sourceId = colId || null;
+            this._moveState.sourceSelected.clear();
+        } else {
+            this._moveState.destId = colId || null;
+            this._moveState.destSelected.clear();
+        }
+        this.renderMoveList(side);
+    }
+
+    renderMoveList(side) {
+        const isSource = side === 'source';
+        const colId = isSource ? this._moveState.sourceId : this._moveState.destId;
+        const selected = isSource ? this._moveState.sourceSelected : this._moveState.destSelected;
+        const listEl = document.getElementById(isSource ? 'moveSourceList' : 'moveDestList');
+        const countEl = document.getElementById(isSource ? 'moveSourceCount' : 'moveDestCount');
+        const searchVal = document.getElementById(isSource ? 'moveSourceSearch' : 'moveDestSearch').value.toLowerCase();
+
+        if (!colId) {
+            listEl.innerHTML = '<p style="padding:16px;color:#999;">問題集を選択してください</p>';
+            if (countEl) countEl.textContent = '';
+            return;
+        }
+
+        const col = this.collections.find(c => c.id === colId);
+        if (!col) return;
+
+        const quizzes = col.quizzes.filter(q =>
+            !searchVal ||
+            q.question.toLowerCase().includes(searchVal) ||
+            q.answer.toLowerCase().includes(searchVal)
+        );
+
+        if (countEl) countEl.textContent = `${col.quizzes.length}問`;
+
+        listEl.innerHTML = '';
+        if (quizzes.length === 0) {
+            listEl.innerHTML = '<p style="padding:16px;color:#999;">問題がありません</p>';
+            return;
+        }
+
+        let lastClickedIndex = null;
+        quizzes.forEach((quiz, idx) => {
+            const item = document.createElement('div');
+            item.className = 'quiz-item' + (selected.has(quiz.id) ? ' selected' : '');
+            item.innerHTML = `<div class="quiz-question">${quiz.question.substring(0, 60)}${quiz.question.length > 60 ? '…' : ''}</div>
+                <div class="quiz-answer" style="font-size:12px;color:#666;">→ ${quiz.answer}</div>`;
+
+            item.addEventListener('click', (e) => {
+                if (e.shiftKey && lastClickedIndex !== null) {
+                    // 範囲選択
+                    const start = Math.min(lastClickedIndex, idx);
+                    const end = Math.max(lastClickedIndex, idx);
+                    for (let i = start; i <= end; i++) selected.add(quizzes[i].id);
+                } else if (e.ctrlKey || e.metaKey) {
+                    // 追加/解除
+                    selected.has(quiz.id) ? selected.delete(quiz.id) : selected.add(quiz.id);
+                } else {
+                    // 単独選択
+                    selected.clear();
+                    selected.add(quiz.id);
+                }
+                lastClickedIndex = idx;
+                this.renderMoveList(side);
+            });
+
+            listEl.appendChild(item);
+        });
+    }
+
+    moveQuizzes(fromSide, toSide) {
+        const fromId = fromSide === 'source' ? this._moveState.sourceId : this._moveState.destId;
+        const toId = toSide === 'source' ? this._moveState.sourceId : this._moveState.destId;
+        const fromSelected = fromSide === 'source' ? this._moveState.sourceSelected : this._moveState.destSelected;
+
+        if (!fromId || !toId) { alert('移動元と移動先の問題集を選択してください'); return; }
+        if (fromId === toId) { alert('移動元と移動先が同じ問題集です'); return; }
+        if (fromSelected.size === 0) { alert('移動する問題を選択してください'); return; }
+
+        const fromCol = this.collections.find(c => c.id === fromId);
+        const toCol = this.collections.find(c => c.id === toId);
+
+        const toMove = fromCol.quizzes.filter(q => fromSelected.has(q.id));
+        toMove.forEach(q => {
+            toCol.quizzes.push({ ...q, id: Date.now().toString() + Math.random().toString(36).substr(2, 5) });
+        });
+        fromCol.quizzes = fromCol.quizzes.filter(q => !fromSelected.has(q.id));
+        fromSelected.clear();
+
+        this.saveToLocalStorage();
+        this.updateMoveCollectionSelects();
+        console.log(`✅ ${toMove.length}問を「${fromCol.name}」→「${toCol.name}」へ移動`);
+    }
+
+    copyQuizzes(fromSide, toSide) {
+        const fromId = fromSide === 'source' ? this._moveState.sourceId : this._moveState.destId;
+        const toId = toSide === 'source' ? this._moveState.sourceId : this._moveState.destId;
+        const fromSelected = fromSide === 'source' ? this._moveState.sourceSelected : this._moveState.destSelected;
+
+        if (!fromId || !toId) { alert('コピー元とコピー先の問題集を選択してください'); return; }
+        if (fromId === toId) { alert('コピー元とコピー先が同じ問題集です'); return; }
+        if (fromSelected.size === 0) { alert('コピーする問題を選択してください'); return; }
+
+        const fromCol = this.collections.find(c => c.id === fromId);
+        const toCol = this.collections.find(c => c.id === toId);
+
+        const toCopy = fromCol.quizzes.filter(q => fromSelected.has(q.id));
+        toCopy.forEach(q => {
+            toCol.quizzes.push({ ...q, id: Date.now().toString() + Math.random().toString(36).substr(2, 5) });
+        });
+
+        this.saveToLocalStorage();
+        this.updateMoveCollectionSelects();
+        console.log(`✅ ${toCopy.length}問を「${fromCol.name}」→「${toCol.name}」へコピー`);
+    }
+
     applyViewMode() {
         // バナー表示
         document.getElementById('viewModeBanner').style.display = 'flex';
@@ -1987,9 +2140,9 @@ class QuizManager {
             if (el) el.style.display = 'none';
         });
 
-        // 編集タブ・候補リストタブを非表示
+        // 編集タブ・候補リストタブ・移動タブを非表示
         document.querySelectorAll('.tab-btn').forEach(btn => {
-            if (btn.dataset.tab === 'edit' || btn.dataset.tab === 'candidates') {
+            if (btn.dataset.tab === 'edit' || btn.dataset.tab === 'candidates' || btn.dataset.tab === 'move') {
                 btn.style.display = 'none';
             }
         });
