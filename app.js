@@ -2,6 +2,7 @@
 
 class QuizManager {
     constructor() {
+        this.isViewMode = new URLSearchParams(window.location.search).has('view');
         this.collections = [];
         this.currentCollection = null;
         this.currentQuiz = null;
@@ -41,6 +42,7 @@ class QuizManager {
         this.setupKeyboardShortcuts();
         this.updateUI();
         this.applySettings();
+        if (this.isViewMode) this.applyViewMode();
         
         console.log('✅ QuizBook の初期化完了');
     }
@@ -1250,6 +1252,7 @@ class QuizManager {
     }
 
     saveToLocalStorage() {
+        if (this.isViewMode) return; // 閲覧モードではlocalStorageに書き込まない
         try {
             const data = {
                 collections: this.collections,
@@ -1293,6 +1296,7 @@ class QuizManager {
     }
 
     loadFromLocalStorage() {
+        if (this.isViewMode) return; // 閲覧モードではlocalStorageを読まない
         const data = localStorage.getItem('quizManagerData');
         if (data) {
             try {
@@ -1466,6 +1470,10 @@ class QuizManager {
 
     // ================== クラウド同期 ==================
     async toggleSync() {
+        if (this.isViewMode) {
+            alert('閲覧モードではクラウド同期を使用できません。');
+            return;
+        }
         if (this.syncEnabled) {
             // 同期を無効化
             const confirmDisable = confirm(
@@ -1879,6 +1887,37 @@ class QuizManager {
         }
 
         this.saveToLocalStorage();
+    }
+
+    applyViewMode() {
+        // バナー表示
+        document.getElementById('viewModeBanner').style.display = 'flex';
+
+        // 非表示にするボタン（編集・保存系）
+        const hideIds = [
+            'saveBtn', 'importCsvBtn',
+            'syncToggleBtn',
+            'newCollectionBtn', 'renameCollectionBtn', 'deleteCollectionBtn',
+            'newQuizBtn', 'deleteQuizBtn',
+            'clearDataBtn'
+        ];
+        hideIds.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+        });
+
+        // 編集タブ・候補リストタブを非表示
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            if (btn.dataset.tab === 'edit' || btn.dataset.tab === 'candidates') {
+                btn.style.display = 'none';
+            }
+        });
+
+        // 読み込みボタンのラベルを変更（メモリのみ読み込みと明示）
+        const loadBtn = document.getElementById('loadBtn');
+        if (loadBtn) loadBtn.textContent = '一時読み込み';
+
+        console.log('👁 閲覧モードで起動しました（localStorageへの読み書き無効）');
     }
 
     clearAllData() {
