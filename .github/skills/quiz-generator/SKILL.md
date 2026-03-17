@@ -1,6 +1,6 @@
 ---
 name: quiz-generator
-description: "QuizBookプロジェクト用のクイズ問題を生成するSkill。「クイズを作って」「〇〇に関する問題を作って」「問題集を生成して」などのリクエストに使用する。JSONフォーマット準拠・難易度設定・カテゴリ分類・大量生成時のファイル書き出し方法を含む。"
+description: "QuizBookプロジェクト用のクイズ問題を生成するSkill。「クイズを作って」「〇〇に関する問題を作って」「問題集を生成して」などのリクエストに使用する。CSV形式での生成・添削・JSONへの変換フローを含む。"
 argument-hint: "テーマ・問題数・難易度を指定（例：百人一首 100問 難しめ）"
 ---
 
@@ -8,47 +8,100 @@ argument-hint: "テーマ・問題数・難易度を指定（例：百人一首 
 
 ## 基本方針
 
-- **JSONフォーマット厳守**（[フォーマット仕様](#jsonフォーマット)参照）
-- **20問以上はPythonスクリプト経由**でファイルに直接書き出す（チャット長さ制限回避）
+- **問題の生成・添削はCSV形式**（`data/csv/`）で行う → 読み書きしやすく添削しやすい
+- **アプリ取り込み用のJSONは変換スクリプトで生成**（`data/formatted/`）
 - **問題文・答えの事実確認**を最優先とする
 - 生成後の添削はユーザーが行う
 
 ---
 
-## JSONフォーマット
+## ファイル構成と役割
 
-```json
-{
-  "collections": [
-    {
-      "name": "コレクション名",
-      "quizzes": [
-        {
-          "question": "問題文",
-          "answer": "答え",
-          "tags": ["タグ1", "タグ2"],
-          "difficulty": 2.5,
-          "genre": "文系学問",
-          "memo": "補足説明・出典など",
-          "created_at": "YYYY-MM-DDT00:00:00.000000"
-        }
-      ]
-    }
-  ]
-}
+```
+data/
+  csv/          ← 一次生成・添削用（作業ファイル）
+  formatted/    ← アプリ取り込み用JSON（変換後の最終成果物）
+```
+
+---
+
+## CSVフォーマット（生成・添削の作業形式）
+
+ヘッダー行：
+```
+問題文,答え,メモ,ジャンル,難易度,タグ
 ```
 
 ### フィールド仕様
 
-| フィールド | 型 | 必須 | 説明 |
-|---|---|---|---|
-| `question` | string | ✅ | 問題文。1文で完結させる。語尾は「〇〇は何でしょう？」「誰でしょう？」など |
-| `answer` | string | ✅ | 答え。簡潔に。別名・読みが必要なら括弧で補足 |
-| `tags` | array | ✅ | ジャンル・トピック・関連語。2〜5個程度 |
-| `difficulty` | float | ✅ | 1.0〜5.0（[難易度基準](#難易度基準)参照） |
-| `genre` | string | ✅ | [ジャンル一覧](#ジャンル一覧)から選ぶ |
-| `memo` | string | ✅ | 出典・補足知識・問題作成メモ。答えのネタバレは控えめに |
-| `created_at` | string | ✅ | ISO 8601形式 |
+| フィールド | 必須 | 説明 |
+|---|---|---|
+| `問題文` | ✅ | 問題文。1文で完結させる。語尾は「〇〇は何でしょう？」「誰でしょう？」など |
+| `答え` | ✅ | 答え。簡潔に。別名・読みが必要なら括弧で補足 |
+| `メモ` | ✅ | 出典・補足知識・問題作成メモ |
+| `ジャンル` | ✅ | [ジャンル一覧](#ジャンル一覧)から選ぶ |
+| `難易度` | ✅ | 1.0〜5.0（[難易度基準](#難易度基準)参照） |
+| `タグ` | ✅ | ジャンル・トピック・関連語。カンマ区切りで複数指定。**複数タグはダブルクォートで囲む** |
+
+### CSVサンプル
+
+```csv
+問題文,答え,メモ,ジャンル,難易度,タグ
+宇都宮頼綱に依頼され小倉山の山荘で百首を選んだ平安末期の歌人は誰でしょう？,藤原定家,小倉百人一首の撰者,文系学問,1.5,"文系学問,百人一首,古典"
+```
+
+### CSVファイルの命名規則
+
+```
+data/csv/<テーマ名>_<YYYY-MM-DD>.csv
+例: data/csv/ネタバレ問題集_2026-03-17.csv
+```
+
+---
+
+## 生成フロー（推奨）
+
+### 1. CSVで一次生成（20問以上でも直接書き出す）
+
+`create_file` ツールで `data/csv/<テーマ名>_<日付>.csv` を作成する。  
+チャット内に全問書き出してもよいが、ファイルに直接書き出す方が管理しやすい。
+
+### 2. CSVで添削
+
+CSV形式のまま `replace_string_in_file` で修正する。  
+行単位で修正できるため、JSON nested構造より格段に扱いやすい。
+
+### 3. JSONに変換してアプリ取り込み
+
+下記の変換スクリプトを使い `data/formatted/` に書き出す。
+
+```python
+import csv, json, pathlib
+
+CSV_PATH  = r"C:\Users\motonaga.shunsuke\workspace\code\vscode\QuizBook\data\csv\<ファイル名>.csv"
+JSON_PATH = r"C:\Users\motonaga.shunsuke\workspace\code\vscode\QuizBook\data\formatted\<ファイル名>_整形済み.json"
+COLLECTION_NAME = "<コレクション名>"
+TIMESTAMP = "2026-03-17T00:00:00.000000"
+
+quizzes = []
+with open(CSV_PATH, encoding="utf-8-sig", newline="") as f:
+    for row in csv.DictReader(f):
+        quizzes.append({
+            "question":   row["問題文"],
+            "answer":     row["答え"],
+            "tags":       [t.strip() for t in row["タグ"].split(",")],
+            "difficulty": float(row["難易度"]),
+            "genre":      row["ジャンル"],
+            "memo":       row["メモ"],
+            "created_at": TIMESTAMP,
+        })
+
+result = {"collections": [{"name": COLLECTION_NAME, "quizzes": quizzes}]}
+pathlib.Path(JSON_PATH).write_text(
+    json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8-sig"
+)
+print(f"完成: {len(quizzes)}問 → {JSON_PATH}")
+```
 
 ---
 
@@ -74,6 +127,7 @@ argument-hint: "テーマ・問題数・難易度を指定（例：百人一首 
 - `社会`（政治・経済・法律・時事）
 - `生活`（食・文化・習慣・行事）
 - `自然`（動植物・天気・環境）
+- `歴史`（歴史上の人物・事件）
 
 ---
 
@@ -140,46 +194,6 @@ argument-hint: "テーマ・問題数・難易度を指定（例：百人一首 
 
 ---
 
-## 大量生成の手順（20問以上）
-
-チャットの応答長さ制限を避けるため、Pythonスクリプトを使う。
-
-### 手順
-
-1. プロジェクトルートに一時スクリプト（例：`generate_quiz_temp.py`）を作成
-2. `quizzes` リストに問題データをすべて記述
-3. スクリプト末尾で `data/formatted/<ファイル名>.json` に書き出し
-4. `python generate_quiz_temp.py` で実行・確認
-5. スクリプトを削除（`Remove-Item generate_quiz_temp.py`）
-
-### スクリプトテンプレート
-
-```python
-import json
-
-quizzes = [
-    {"question": "...", "answer": "...", "tags": [...], "difficulty": 2.0, "genre": "文系学問", "memo": "..."},
-    # ...
-]
-
-result = {
-    "collections": [{"name": "コレクション名", "quizzes": []}]
-}
-
-timestamp = "2026-01-01T00:00:00.000000"
-for q in quizzes:
-    q["created_at"] = timestamp
-    result["collections"][0]["quizzes"].append(q)
-
-output_path = r"C:\Users\motonaga.shunsuke\workspace\code\vscode\QuizBook\data\formatted\ファイル名_整形済み.json"
-with open(output_path, "w", encoding="utf-8") as f:
-    json.dump(result, f, ensure_ascii=False, indent=2)
-
-print(f"完成: {len(quizzes)}問 → {output_path}")
-```
-
----
-
 ## カテゴリ設計のヒント
 
 100問規模の問題集を作る際は、以下のようにバランスよく分類する。
@@ -195,7 +209,21 @@ print(f"完成: {len(quizzes)}問 → {output_path}")
 
 ## 出力先
 
-生成したJSONは `data/formatted/<テーマ名>_整形済み.json` に保存する。
+| 用途 | パス |
+|---|---|
+| 生成・添削（作業用） | `data/csv/<テーマ名>_<日付>.csv` |
+| アプリ取り込み（最終成果物） | `data/formatted/<テーマ名>_整形済み.json` |
+
+---
+
+## ドメイン知識ファイル
+
+テーマ固有の事実確認情報は以下のファイルに分離している。
+**該当テーマのクイズを生成・添削する際は、作業開始前に必ず該当ファイルを読み込むこと。**
+
+| テーマ | ファイル |
+|---|---|
+| 百人一首 | `.github/skills/quiz-generator/knowledge/hyakunin-isshu.md` |
 
 ---
 
@@ -211,3 +239,10 @@ print(f"完成: {len(quizzes)}問 → {output_path}")
 ---
 
 ## 添削フロー（生成後の品質改善）
+
+1. CSVファイルを確認し、問題をリストアップ
+2. 「問題文・答え・メモ」を1行ずつ確認
+3. `replace_string_in_file` で該当行を修正
+4. 修正完了後に `git commit`
+5. 全問添削が終わったら変換スクリプトでJSONを生成し `git commit`
+
