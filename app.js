@@ -178,6 +178,9 @@ class QuizManager {
 
     // ================== タブ切り替え ==================
     switchTab(tabName) {
+        // 閲覧モードでは編集・候補リストタブへの遷移をブロック
+        if (this.isViewMode && (tabName === 'edit' || tabName === 'candidates')) return;
+
         // タブボタンの切り替え
         document.querySelectorAll('.tab-btn').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.tab === tabName);
@@ -485,6 +488,7 @@ class QuizManager {
 
     selectQuiz(quizId) {
         if (!this.currentCollection) return;
+        if (this.isViewMode) return; // 閲覧モードでは編集タブに遷移しない
 
         this.currentQuiz = this.currentCollection.quizzes.find(q => q.id === quizId) || null;
 
