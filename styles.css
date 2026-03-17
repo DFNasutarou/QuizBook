@@ -84,6 +84,11 @@ h1 {
     white-space: nowrap;
 }
 
+.view-mode-link {
+    text-decoration: none;
+    white-space: nowrap;
+}
+
 /* ボタン */
 .btn {
     padding: 8px 16px;
