@@ -333,6 +333,15 @@
         };
     </script>
 
+    <!-- 同期オーバーレイ -->
+    <div id="syncOverlay" class="sync-overlay" style="display:none;">
+        <div class="sync-overlay-content">
+            <div class="sync-spinner"></div>
+            <div id="syncOverlayMessage" class="sync-overlay-message">クラウドと同期中...</div>
+            <div id="syncOverlayDetail" class="sync-overlay-detail"></div>
+        </div>
+    </div>
+
     <script src="firebase-sync.js"></script>
     <script src="app.js"></script>
 </body>

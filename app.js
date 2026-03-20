@@ -1221,11 +1221,14 @@ class QuizManager {
         if (!confirmDownload) return;
         
         console.log('📥 クラウドからダウンロード中...');
+        this.showSyncOverlay('📥 ダウンロード中...', 'クラウドからデータを取得しています');
         
         try {
             const firestoreData = await window.firebaseSync.loadCollections();
             
             if (firestoreData && firestoreData.length > 0) {
+                const totalQuizzes = firestoreData.reduce((sum, c) => sum + (c.quizzes?.length || 0), 0);
+                this.updateSyncOverlay('✅ データを反映中...', `${firestoreData.length} 問題集・${totalQuizzes} 問をダウンロードしました`);
                 this.isLoadingFromFirestore = true;
                 this.collections = firestoreData;
                 if (this.collections.length > 0) {
@@ -1235,15 +1238,18 @@ class QuizManager {
                 this.saveToLocalStorage();
                 this.isLoadingFromFirestore = false;
                 
-                const totalQuizzes = this.collections.reduce((sum, c) => sum + (c.quizzes?.length || 0), 0);
+                await new Promise(r => setTimeout(r, 500));
+                this.hideSyncOverlay();
                 this.showNotification(
                     `<strong>☁️ クラウドから取得しました</strong><br><small>${this.collections.length}問題集・${totalQuizzes}問をダウンロード</small>`,
                     'success'
                 );
             } else {
+                this.hideSyncOverlay();
                 alert('クラウドにデータが見つかりませんでした');
             }
         } catch (err) {
+            this.hideSyncOverlay();
             console.error('❌ クラウドダウンロードエラー:', err);
             this.showNotification(`<strong>⚠️ ダウンロードに失敗</strong><br><small>${err.message}</small>`, 'error');
         }
@@ -1565,7 +1571,9 @@ class QuizManager {
             localStorage.setItem('quizbook_sync_enabled', 'true');
 
             // Firestoreからデータを読み込む
+            this.showSyncOverlay('☁️ クラウドに接続中...', 'データを確認しています');
             const firestoreData = await window.firebaseSync.loadCollections();
+            this.hideSyncOverlay();
             if (firestoreData && firestoreData.length > 0) {
                 const useFirestore = confirm(
                     '☁️ クラウドにデータが見つかりました\n\n' +
@@ -1719,17 +1727,51 @@ class QuizManager {
         }
     }
 
+    showSyncOverlay(message, detail) {
+        const overlay = document.getElementById('syncOverlay');
+        const msgEl = document.getElementById('syncOverlayMessage');
+        const detailEl = document.getElementById('syncOverlayDetail');
+        if (overlay) {
+            msgEl.textContent = message || 'クラウドと同期中...';
+            detailEl.textContent = detail || '';
+            overlay.style.display = 'flex';
+            this._syncOverlayStart = Date.now();
+        }
+    }
+
+    updateSyncOverlay(message, detail) {
+        const msgEl = document.getElementById('syncOverlayMessage');
+        const detailEl = document.getElementById('syncOverlayDetail');
+        if (msgEl && message) msgEl.textContent = message;
+        if (detailEl && detail !== undefined) detailEl.textContent = detail;
+    }
+
+    hideSyncOverlay() {
+        const overlay = document.getElementById('syncOverlay');
+        if (overlay) overlay.style.display = 'none';
+    }
+
     async enableSyncSilently() {
         if (!window.firebaseSync) return;
 
+        this.showSyncOverlay('☁️ クラウドに接続中...', 'Firebase を初期化しています');
+
         const success = await window.firebaseSync.enableSync();
-        if (!success) return;
+        if (!success) {
+            this.hideSyncOverlay();
+            return;
+        }
 
         this.syncEnabled = true;
+
+        this.updateSyncOverlay('📥 データをダウンロード中...', 'クラウドから最新のデータを取得しています');
 
         // 起動時にクラウドの最新データを明示的に取得してからUIを更新
         const firestoreData = await window.firebaseSync.loadCollections();
         if (firestoreData && firestoreData.length > 0) {
+            const totalQuizzes = firestoreData.reduce((sum, c) => sum + (c.quizzes?.length || 0), 0);
+            this.updateSyncOverlay('✅ データを反映中...', `${firestoreData.length} 問題集・${totalQuizzes} 問を読み込みました`);
+
             this.isLoadingFromFirestore = true;
             this.collections = firestoreData;
             if (this.collections.length > 0) {
@@ -1742,6 +1784,10 @@ class QuizManager {
         }
 
         this.updateSyncUI();
+
+        // 少し余韻を持たせて閉じる
+        await new Promise(r => setTimeout(r, 500));
+        this.hideSyncOverlay();
     }
 
     updateSyncUI() {
