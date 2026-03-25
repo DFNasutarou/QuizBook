@@ -873,6 +873,33 @@ h1 {
 
 /* レスポンシブ */
 @media (max-width: 768px) {
+    .container {
+        padding: 8px;
+    }
+
+    header {
+        flex-direction: column;
+        gap: 12px;
+        padding: 12px;
+        align-items: stretch;
+    }
+
+    h1 {
+        font-size: 18px;
+        text-align: center;
+    }
+
+    .header-controls {
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 6px;
+    }
+
+    .header-controls .btn {
+        font-size: 12px;
+        padding: 6px 10px;
+    }
+
     .split-panel {
         grid-template-columns: 1fr;
     }
@@ -881,12 +908,123 @@ h1 {
         grid-template-columns: 1fr;
     }
 
-    .header-controls {
-        flex-direction: column;
-    }
-
     .tabs {
         overflow-x: auto;
+        gap: 3px;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .tab-btn {
+        padding: 10px 14px;
+        font-size: 13px;
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+
+    .tab-content {
+        padding: 12px;
+        min-height: auto;
+    }
+
+    .toolbar {
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+
+    .toolbar .btn {
+        font-size: 12px;
+        padding: 6px 10px;
+    }
+
+    /* --- 出題画面のモバイル対応 --- */
+    .quiz-display {
+        max-width: 100%;
+    }
+
+    .quiz-header {
+        flex-direction: column;
+        gap: 10px;
+        padding: 10px;
+        margin-bottom: 12px;
+    }
+
+    .quiz-info {
+        justify-content: center;
+        font-size: 14px;
+    }
+
+    .quiz-controls {
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+
+    .quiz-controls .btn {
+        padding: 10px 14px;
+        font-size: 14px;
+        min-height: 44px;
+    }
+
+    .quiz-question-display {
+        padding: 16px;
+        margin-bottom: 12px;
+        min-height: 150px;
+    }
+
+    .quiz-question-display h2 {
+        font-size: 16px;
+        margin-bottom: 12px;
+    }
+
+    .question-text {
+        line-height: 1.8;
+    }
+
+    .answer-display {
+        padding: 16px;
+        margin-bottom: 10px;
+    }
+
+    .answer-display h3 {
+        font-size: 15px;
+        margin-bottom: 10px;
+    }
+
+    .answer-text {
+        font-size: 22px;
+    }
+
+    .memo-display {
+        padding: 16px;
+    }
+
+    .memo-display h3 {
+        font-size: 15px;
+        margin-bottom: 10px;
+    }
+
+    .memo-text {
+        font-size: 15px;
+    }
+
+    .quiz-filters h3 {
+        font-size: 16px;
+    }
+
+    #quizCollectionCheckboxes label {
+        font-size: 14px;
+        padding: 6px 4px;
+    }
+
+    /* フィルターコントロール */
+    .filter-controls {
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    /* 設定画面 */
+    .settings-panel {
+        padding: 14px;
     }
 }
 
