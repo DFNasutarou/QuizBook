@@ -281,7 +281,7 @@ class FirebaseSync {
             console.log('✅ Firestoreへの同期が完了しました');
         } catch (error) {
             console.error('❌ Firestore同期エラー:', error);
-            alert('クラウド同期中にエラーが発生しました: ' + error.message);
+            throw error;
         }
     }
 
@@ -310,8 +310,7 @@ class FirebaseSync {
             return loadedCollections;
         } catch (error) {
             console.error('❌ Firestoreからの読み込みエラー:', error);
-            alert('クラウドからのデータ読み込み中にエラーが発生しました: ' + error.message);
-            return null;
+            throw error;
         }
     }
 

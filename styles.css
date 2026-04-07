@@ -59,6 +59,17 @@ h1 {
     gap: 10px;
 }
 
+.sync-summary {
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    padding: 8px 12px;
+    margin-bottom: 12px;
+    font-size: 13px;
+    color: #495057;
+}
+
 /* 閲覧モードバナー */
 #viewModeBanner {
     background: #fff3cd;

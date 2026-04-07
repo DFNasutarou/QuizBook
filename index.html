@@ -31,9 +31,12 @@
                 <a href="?view" class="btn btn-secondary view-mode-link" title="閲覧モードで開く">👁 閲覧モード</a>
             </div>
         </header>
+        <div id="syncSummary" class="sync-summary">最終同期: 未実行</div>
 
         <div class="tabs">
             <button class="tab-btn active" data-tab="manage">問題集管理</button>
+            <button class="tab-btn" data-tab="collection-folder-move">問題集フォルダ移動</button>
+            <button class="tab-btn" data-tab="quiz-organize">問題並び替え・削除</button>
             <button class="tab-btn" data-tab="edit">問題編集</button>
             <button class="tab-btn" data-tab="move">問題移動</button>
             <button class="tab-btn" data-tab="candidates">候補リスト</button>
@@ -48,13 +51,9 @@
                 <button id="renameFolderBtn" class="btn btn-secondary">フォルダ名変更</button>
                 <button id="deleteFolderBtn" class="btn btn-danger">フォルダ削除</button>
                 <button id="downloadFolderBtn" class="btn btn-secondary">フォルダ一括DL</button>
-                <select id="moveCollectionFolderTarget" class="folder-move-select"></select>
-                <button id="moveCollectionFolderBtn" class="btn btn-secondary">問題集をフォルダ移動</button>
                 <button id="newCollectionBtn" class="btn btn-primary">新規問題集</button>
                 <button id="renameCollectionBtn" class="btn btn-secondary">名前変更</button>
                 <button id="deleteCollectionBtn" class="btn btn-danger">問題集削除</button>
-                <button id="newQuizBtn" class="btn btn-primary">新規問題</button>
-                <button id="deleteQuizBtn" class="btn btn-danger">問題削除</button>
             </div>
 
             <div class="split-panel">
@@ -83,6 +82,63 @@
                     <div id="quizList" class="quiz-list"></div>
                 </div>
             </div>
+        </div>
+
+        <!-- 問題集フォルダ移動タブ -->
+        <div id="collection-folder-move-tab" class="tab-content">
+            <div class="move-panel">
+                <div class="move-collection-panel">
+                    <div class="move-collection-header">
+                        <h3>移動元フォルダ</h3>
+                        <select id="collectionMoveSourceFolder" class="move-collection-select">
+                            <option value="">フォルダを選択...</option>
+                        </select>
+                        <span class="move-count" id="collectionMoveSourceCount"></span>
+                    </div>
+                    <div id="collectionMoveSourceList" class="quiz-list move-quiz-list"></div>
+                </div>
+
+                <div class="move-actions">
+                    <button id="moveCollectionsRightBtn" class="btn btn-primary move-btn" title="選択した問題集を右へ移動">→ 移動</button>
+                    <button id="moveCollectionsLeftBtn" class="btn btn-primary move-btn" title="選択した問題集を左へ移動">← 移動</button>
+                </div>
+
+                <div class="move-collection-panel">
+                    <div class="move-collection-header">
+                        <h3>移動先フォルダ</h3>
+                        <select id="collectionMoveDestFolder" class="move-collection-select">
+                            <option value="">フォルダを選択...</option>
+                        </select>
+                        <span class="move-count" id="collectionMoveDestCount"></span>
+                    </div>
+                    <div id="collectionMoveDestList" class="quiz-list move-quiz-list"></div>
+                </div>
+            </div>
+            <p class="move-hint">💡 問題集名をクリックして選択し、中央ボタンでフォルダ移動します</p>
+        </div>
+
+        <!-- 問題並び替え・削除タブ -->
+        <div id="quiz-organize-tab" class="tab-content">
+            <div class="toolbar">
+                <select id="quizManageCollection" class="move-collection-select" style="max-width: 420px;">
+                    <option value="">問題集を選択...</option>
+                </select>
+                <button id="newQuizBtn" class="btn btn-primary">新規問題</button>
+                <button id="deleteQuizBtn" class="btn btn-danger">問題削除</button>
+            </div>
+            <div class="filter-controls">
+                <input type="text" id="quizManageSearch" placeholder="検索...">
+                <select id="quizManageGenreFilter">
+                    <option value="">全ジャンル</option>
+                </select>
+                <select id="quizManageDifficultyFilter">
+                    <option value="">全難易度</option>
+                    <option value="1">易</option>
+                    <option value="2">中</option>
+                    <option value="3">難</option>
+                </select>
+            </div>
+            <div id="quizManageList" class="quiz-list"></div>
         </div>
 
         <!-- 問題移動タブ -->
