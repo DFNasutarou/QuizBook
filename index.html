@@ -44,6 +44,11 @@
         <!-- 問題集管理タブ -->
         <div id="manage-tab" class="tab-content active">
             <div class="toolbar">
+                <button id="newFolderBtn" class="btn btn-secondary">新規フォルダ</button>
+                <button id="renameFolderBtn" class="btn btn-secondary">フォルダ名変更</button>
+                <button id="deleteFolderBtn" class="btn btn-danger">フォルダ削除</button>
+                <button id="downloadFolderBtn" class="btn btn-secondary">フォルダ一括DL</button>
+                <button id="moveCollectionFolderBtn" class="btn btn-secondary">問題集をフォルダ移動</button>
                 <button id="newCollectionBtn" class="btn btn-primary">新規問題集</button>
                 <button id="renameCollectionBtn" class="btn btn-secondary">名前変更</button>
                 <button id="deleteCollectionBtn" class="btn btn-danger">問題集削除</button>
@@ -53,6 +58,10 @@
 
             <div class="split-panel">
                 <div class="panel">
+                    <h3>フォルダ一覧</h3>
+                    <select id="folderList" size="6"></select>
+                    <div id="folderStats" class="folder-stats"></div>
+
                     <h3>問題集一覧</h3>
                     <select id="collectionList" size="10"></select>
                 </div>

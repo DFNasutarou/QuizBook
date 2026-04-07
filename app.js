@@ -20,6 +20,21 @@ class QuizManager {
         };
         this.syncEnabled = false;  // 同期状態
         this.isLoadingFromFirestore = false;  // Firestoreからの読み込み中フラグ
+        this.cloudSaveTimer = null;
+        this.cloudSaveDelayMs = 15000;
+        this.defaultFolderName = '未分類';
+        this.folders = [
+            {
+                id: 'folder_default',
+                name: this.defaultFolderName,
+                maxCollections: 50,
+                maxQuizzes: 5000
+            }
+        ];
+        this.selectedFolderId = 'folder_default';
+        this.limits = {
+            maxQuizzesPerCollection: 500
+        };
 
         this.init();
     }
@@ -43,6 +58,381 @@ class QuizManager {
         if (this.isViewMode) this.applyViewMode();
         
         console.log('✅ QuizBook の初期化完了');
+    }
+
+    getCollectionQuizCount(collection) {
+        if (!collection) return 0;
+        if (Array.isArray(collection.quizzes) && collection.isDownloaded !== false) {
+            return collection.quizzes.length;
+        }
+        return collection.quizCount || 0;
+    }
+
+    getVisibleCollections() {
+        if (!this.selectedFolderId) return this.collections;
+        const folder = this.folders.find(f => f.id === this.selectedFolderId);
+        if (!folder) return this.collections;
+        return this.collections.filter(col => (col.folder || this.defaultFolderName) === folder.name);
+    }
+
+    getFolderById(folderId) {
+        return this.folders.find(folder => folder.id === folderId) || null;
+    }
+
+    ensureDefaultFolder() {
+        const existing = this.folders.find(folder => folder.name === this.defaultFolderName);
+        if (!existing) {
+            this.folders.unshift({
+                id: 'folder_default',
+                name: this.defaultFolderName,
+                maxCollections: 50,
+                maxQuizzes: 5000
+            });
+        }
+        if (!this.selectedFolderId || !this.getFolderById(this.selectedFolderId)) {
+            const defaultFolder = this.folders.find(folder => folder.name === this.defaultFolderName) || this.folders[0];
+            this.selectedFolderId = defaultFolder ? defaultFolder.id : null;
+        }
+    }
+
+    ensureFoldersFromCollections() {
+        this.ensureDefaultFolder();
+        const existingNames = new Set(this.folders.map(folder => folder.name));
+        this.collections.forEach(collection => {
+            const folderName = collection.folder || this.defaultFolderName;
+            collection.folder = folderName;
+            if (!existingNames.has(folderName)) {
+                this.folders.push({
+                    id: `folder_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+                    name: folderName,
+                    maxCollections: 50,
+                    maxQuizzes: 5000
+                });
+                existingNames.add(folderName);
+            }
+        });
+    }
+
+    getFolderUsage(folderName) {
+        const collections = this.collections.filter(col => (col.folder || this.defaultFolderName) === folderName);
+        const totalQuizzes = collections.reduce((sum, col) => sum + this.getCollectionQuizCount(col), 0);
+        return {
+            collectionCount: collections.length,
+            quizCount: totalQuizzes
+        };
+    }
+
+    canAddCollectionToFolder(folderName) {
+        const folder = this.folders.find(f => f.name === folderName);
+        if (!folder) return true;
+        const usage = this.getFolderUsage(folderName);
+        if (usage.collectionCount >= folder.maxCollections) {
+            alert(`フォルダ「${folder.name}」の上限に達しています（問題集 ${folder.maxCollections} 個まで）。`);
+            return false;
+        }
+        return true;
+    }
+
+    canAddQuizzesToFolder(folderName, quizDelta) {
+        const folder = this.folders.find(f => f.name === folderName);
+        if (!folder) return true;
+        const usage = this.getFolderUsage(folderName);
+        if (usage.quizCount + quizDelta > folder.maxQuizzes) {
+            alert(`フォルダ「${folder.name}」の問題数上限を超えます（${folder.maxQuizzes}問まで）。`);
+            return false;
+        }
+        return true;
+    }
+
+    canAddQuizzesToCollection(collection, quizDelta) {
+        if (!collection) return false;
+        const currentCount = this.getCollectionQuizCount(collection);
+        if (currentCount + quizDelta > this.limits.maxQuizzesPerCollection) {
+            alert(`問題集「${collection.name}」の上限を超えます（${this.limits.maxQuizzesPerCollection}問まで）。`);
+            return false;
+        }
+        return true;
+    }
+
+    updateFolderList() {
+        const select = document.getElementById('folderList');
+        if (!select) return;
+
+        select.innerHTML = '';
+        this.folders.forEach(folder => {
+            const usage = this.getFolderUsage(folder.name);
+            const option = document.createElement('option');
+            option.value = folder.id;
+            option.textContent = `${folder.name} (${usage.collectionCount}集 / ${usage.quizCount}問)`;
+            if (folder.id === this.selectedFolderId) {
+                option.selected = true;
+            }
+            select.appendChild(option);
+        });
+
+        this.updateFolderStats();
+    }
+
+    updateFolderStats() {
+        const statsEl = document.getElementById('folderStats');
+        if (!statsEl) return;
+
+        const folder = this.getFolderById(this.selectedFolderId);
+        if (!folder) {
+            statsEl.textContent = '';
+            return;
+        }
+
+        const usage = this.getFolderUsage(folder.name);
+        statsEl.innerHTML = `
+            問題集: ${usage.collectionCount} / ${folder.maxCollections}<br>
+            問題数: ${usage.quizCount} / ${folder.maxQuizzes}
+        `;
+    }
+
+    selectFolder(folderId) {
+        this.selectedFolderId = folderId;
+        const visible = this.getVisibleCollections();
+        this.currentCollection = visible.length > 0 ? visible[0] : null;
+        this.currentQuiz = null;
+        this.updateUI();
+    }
+
+    newFolder() {
+        const name = prompt('新しいフォルダ名を入力してください:');
+        if (!name) return;
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        if (this.folders.some(folder => folder.name === trimmed)) {
+            alert('同名のフォルダが既に存在します。');
+            return;
+        }
+
+        const folder = {
+            id: `folder_${Date.now()}`,
+            name: trimmed,
+            maxCollections: 50,
+            maxQuizzes: 5000
+        };
+        this.folders.push(folder);
+        this.selectedFolderId = folder.id;
+        this.updateUI();
+        this.saveToLocalStorage();
+    }
+
+    renameFolder() {
+        const folder = this.getFolderById(this.selectedFolderId);
+        if (!folder) {
+            alert('フォルダを選択してください');
+            return;
+        }
+        if (folder.name === this.defaultFolderName) {
+            alert('未分類フォルダの名前は変更できません。');
+            return;
+        }
+
+        const newName = prompt('新しいフォルダ名を入力してください:', folder.name);
+        if (!newName || newName.trim() === folder.name) return;
+        if (this.folders.some(f => f.name === newName.trim())) {
+            alert('同名のフォルダが既に存在します。');
+            return;
+        }
+
+        const oldName = folder.name;
+        folder.name = newName.trim();
+        this.collections.forEach(col => {
+            if ((col.folder || this.defaultFolderName) === oldName) {
+                col.folder = folder.name;
+            }
+        });
+
+        this.updateUI();
+        this.saveToLocalStorage();
+    }
+
+    deleteFolder() {
+        const folder = this.getFolderById(this.selectedFolderId);
+        if (!folder) {
+            alert('フォルダを選択してください');
+            return;
+        }
+        if (folder.name === this.defaultFolderName) {
+            alert('未分類フォルダは削除できません。');
+            return;
+        }
+        if (!confirm(`フォルダ「${folder.name}」を削除しますか？\n問題集は未分類に移動します。`)) return;
+
+        this.collections.forEach(col => {
+            if ((col.folder || this.defaultFolderName) === folder.name) {
+                col.folder = this.defaultFolderName;
+            }
+        });
+        this.folders = this.folders.filter(f => f.id !== folder.id);
+        const defaultFolder = this.folders.find(f => f.name === this.defaultFolderName) || this.folders[0];
+        this.selectedFolderId = defaultFolder ? defaultFolder.id : null;
+        this.updateUI();
+        this.saveToLocalStorage();
+    }
+
+    moveCurrentCollectionToFolder() {
+        if (!this.currentCollection) {
+            alert('問題集を選択してください');
+            return;
+        }
+
+        const targetName = prompt(
+            `移動先フォルダ名を入力してください。\n\n利用可能: ${this.folders.map(f => f.name).join(', ')}`,
+            this.currentCollection.folder || this.defaultFolderName
+        );
+        if (!targetName) return;
+        const folder = this.folders.find(f => f.name === targetName.trim());
+        if (!folder) {
+            alert('指定したフォルダは存在しません。');
+            return;
+        }
+        if ((this.currentCollection.folder || this.defaultFolderName) === folder.name) {
+            return;
+        }
+        if (!this.canAddCollectionToFolder(folder.name)) return;
+        if (!this.canAddQuizzesToFolder(folder.name, this.getCollectionQuizCount(this.currentCollection))) return;
+
+        this.currentCollection.folder = folder.name;
+        this.selectedFolderId = folder.id;
+        this.updateUI();
+        this.saveToLocalStorage();
+    }
+
+    async downloadCurrentFolderFromCloud() {
+        if (!this.syncEnabled || !window.firebaseSync) {
+            alert('クラウド同期が有効になっていません');
+            return;
+        }
+        const folder = this.getFolderById(this.selectedFolderId);
+        if (!folder) {
+            alert('フォルダを選択してください');
+            return;
+        }
+
+        this.showSyncOverlay('📥 フォルダをダウンロード中...', `「${folder.name}」の問題集を取得しています`);
+        try {
+            const loadedCollections = await window.firebaseSync.loadCollectionsByFolder(folder.name);
+            let loadedCount = 0;
+            loadedCollections.forEach(loaded => {
+                const idx = this.collections.findIndex(col => col.id === loaded.id);
+                if (idx !== -1) {
+                    this.collections[idx] = {
+                        ...loaded,
+                        folder: loaded.folder || folder.name,
+                        isCloudPlaceholder: false,
+                        isDownloaded: true,
+                        quizCount: loaded.quizzes.length
+                    };
+                    loadedCount += 1;
+                }
+            });
+
+            this.updateUI();
+            this.isLoadingFromFirestore = true;
+            this.saveToLocalStorage();
+            this.isLoadingFromFirestore = false;
+            this.hideSyncOverlay();
+            this.showNotification(`<strong>📥 フォルダを取得しました</strong><br><small>${loadedCount} 問題集をダウンロード</small>`, 'success');
+        } catch (error) {
+            this.hideSyncOverlay();
+            this.showNotification(`<strong>⚠️ フォルダDLに失敗</strong><br><small>${error.message}</small>`, 'error');
+        }
+    }
+
+    isCollectionDownloaded(collection) {
+        if (!collection) return false;
+        if (collection.isCloudPlaceholder && !collection.isDownloaded) return false;
+        return Array.isArray(collection.quizzes);
+    }
+
+    ensureCurrentCollectionReadyForEdit() {
+        if (!this.currentCollection) {
+            alert('問題集を選択してください');
+            return false;
+        }
+        if (!this.isCollectionDownloaded(this.currentCollection)) {
+            alert('この問題集は未ダウンロードのため編集できません。先に問題集を開いてダウンロードしてください。');
+            return false;
+        }
+        return true;
+    }
+
+    scheduleCloudUpload() {
+        if (!this.syncEnabled || !window.firebaseSync || this.isLoadingFromFirestore) return;
+        if (this.cloudSaveTimer) {
+            clearTimeout(this.cloudSaveTimer);
+        }
+        this.cloudSaveTimer = setTimeout(() => {
+            this.uploadToCloud();
+            this.cloudSaveTimer = null;
+        }, this.cloudSaveDelayMs);
+    }
+
+    buildCollectionsFromCloudMetas(metas) {
+        const localById = new Map(this.collections.map(col => [col.id, col]));
+        return metas.map(meta => {
+            const local = localById.get(meta.id);
+            const localDownloaded = local && Array.isArray(local.quizzes) && local.quizzes.length > 0;
+
+            if (localDownloaded) {
+                return {
+                    ...local,
+                    name: meta.name || local.name,
+                    folder: meta.folder || local.folder || '未分類',
+                    quizCount: meta.quizCount || local.quizzes.length,
+                    isCloudPlaceholder: false,
+                    isDownloaded: true
+                };
+            }
+
+            return {
+                id: meta.id,
+                name: meta.name || '無題の問題集',
+                quizzes: [],
+                quizCount: meta.quizCount || 0,
+                folder: meta.folder || '未分類',
+                created_at: meta.created_at || new Date().toISOString(),
+                isCloudPlaceholder: true,
+                isDownloaded: false
+            };
+        });
+    }
+
+    async downloadCollectionIfNeeded(collection) {
+        if (!collection || this.isCollectionDownloaded(collection) || !this.syncEnabled || !window.firebaseSync) {
+            return true;
+        }
+
+        this.showSyncOverlay('📥 問題集をダウンロード中...', `「${collection.name}」を取得しています`);
+        const loaded = await window.firebaseSync.loadCollectionById(collection.id);
+        this.hideSyncOverlay();
+
+        if (!loaded) {
+            alert('問題集のダウンロードに失敗しました。ネットワーク接続を確認してください。');
+            return false;
+        }
+
+        const idx = this.collections.findIndex(c => c.id === collection.id);
+        if (idx !== -1) {
+            this.collections[idx] = {
+                ...loaded,
+                folder: loaded.folder || collection.folder || '未分類',
+                isCloudPlaceholder: false,
+                isDownloaded: true,
+                quizCount: loaded.quizzes.length
+            };
+            this.currentCollection = this.collections[idx];
+            this.isLoadingFromFirestore = true;
+            this.saveToLocalStorage();
+            this.isLoadingFromFirestore = false;
+            this.updateUI();
+        }
+
+        return true;
     }
 
     setupKeyboardShortcuts() {
@@ -112,6 +502,12 @@ class QuizManager {
         document.getElementById('deleteCollectionBtn').addEventListener('click', () => this.deleteCollection());
         document.getElementById('collectionList').addEventListener('change', (e) => this.selectCollection(e.target.value));
         document.getElementById('collectionList').addEventListener('dblclick', (e) => this.startQuizFromCollection());
+        document.getElementById('folderList').addEventListener('change', (e) => this.selectFolder(e.target.value));
+        document.getElementById('newFolderBtn').addEventListener('click', () => this.newFolder());
+        document.getElementById('renameFolderBtn').addEventListener('click', () => this.renameFolder());
+        document.getElementById('deleteFolderBtn').addEventListener('click', () => this.deleteFolder());
+        document.getElementById('moveCollectionFolderBtn').addEventListener('click', () => this.moveCurrentCollectionToFolder());
+        document.getElementById('downloadFolderBtn').addEventListener('click', () => this.downloadCurrentFolderFromCloud());
 
         // 問題管理
         document.getElementById('newQuizBtn').addEventListener('click', () => this.newQuiz());
@@ -207,11 +603,19 @@ class QuizManager {
         const name = prompt('新しい問題集の名前を入力してください:');
         if (!name) return;
 
+        const selectedFolder = this.getFolderById(this.selectedFolderId);
+        const folderName = selectedFolder ? selectedFolder.name : this.defaultFolderName;
+        if (!this.canAddCollectionToFolder(folderName)) return;
+
         const collection = {
             id: Date.now().toString(),
             name: name,
             quizzes: [],
-            created_at: new Date().toISOString()
+            created_at: new Date().toISOString(),
+            folder: folderName,
+            isCloudPlaceholder: false,
+            isDownloaded: true,
+            quizCount: 0
         };
 
         this.collections.push(collection);
@@ -242,7 +646,7 @@ class QuizManager {
         this.saveToLocalStorage();
     }
 
-    deleteCollection() {
+    async deleteCollection() {
         if (!this.currentCollection) {
             alert('削除する問題集を選択してください');
             return;
@@ -250,29 +654,50 @@ class QuizManager {
 
         if (!confirm(`「${this.currentCollection.name}」を削除しますか？`)) return;
 
+        const deletedId = this.currentCollection.id;
         const deletedName = this.currentCollection.name;
         const deletedQuizCount = this.currentCollection.quizzes?.length || 0;
         
         this.collections = this.collections.filter(c => c.id !== this.currentCollection.id);
-        this.currentCollection = this.collections.length > 0 ? this.collections[0] : null;
+        const visibleCollections = this.getVisibleCollections();
+        this.currentCollection = visibleCollections.length > 0
+            ? visibleCollections[0]
+            : (this.collections.length > 0 ? this.collections[0] : null);
         
         console.log(`🗑️ 問題集を削除: "${deletedName}" (${deletedQuizCount}問)`);
         
         this.updateUI();
         this.saveToLocalStorage();
+
+        if (this.syncEnabled && window.firebaseSync) {
+            try {
+                await window.firebaseSync.deleteCollectionById(deletedId);
+            } catch (error) {
+                console.error('❌ クラウド側の問題集削除に失敗:', error);
+                this.showNotification('<strong>⚠️ クラウド削除に失敗</strong><br><small>次回同期で再実行されます</small>', 'warning');
+            }
+        }
     }
 
-    selectCollection(collectionId) {
+    async selectCollection(collectionId) {
         this.currentCollection = this.collections.find(c => c.id === collectionId) || null;
         this.currentQuiz = null;
+
+        if (this.currentCollection && !this.isCollectionDownloaded(this.currentCollection)) {
+            await this.downloadCollectionIfNeeded(this.currentCollection);
+        }
+
         this.updateQuizList();
     }
 
-    startQuizFromCollection() {
+    async startQuizFromCollection() {
         if (!this.currentCollection) {
             alert('問題集を選択してください');
             return;
         }
+
+        const ready = await this.downloadCollectionIfNeeded(this.currentCollection);
+        if (!ready) return;
 
         // 出題タブに切り替え
         this.switchTab('quiz');
@@ -293,10 +718,7 @@ class QuizManager {
 
     // ================== 問題管理 ==================
     newQuiz() {
-        if (!this.currentCollection) {
-            alert('問題集を選択してください');
-            return;
-        }
+        if (!this.ensureCurrentCollectionReadyForEdit()) return;
 
         this.currentQuiz = null;
         this.clearEditForm();
@@ -304,29 +726,22 @@ class QuizManager {
     }
 
     deleteQuiz() {
-        if (!this.currentQuiz || !this.currentCollection) {
-        const deletedQuestion = this.currentQuiz.question.substring(0, 30);
-        
-        this.currentCollection.quizzes = this.currentCollection.quizzes.filter(q => q.id !== this.currentQuiz.id);
-        this.currentQuiz = null;
-        
-        console.log(`🗑️ 問題を削除: "${deletedQuestion}..." (問題集: ${this.currentCollection.name})`);
-        
-        }
+        if (!this.ensureCurrentCollectionReadyForEdit() || !this.currentQuiz) return;
 
         if (!confirm('この問題を削除しますか？')) return;
 
+        const deletedQuestion = this.currentQuiz.question.substring(0, 30);
+
         this.currentCollection.quizzes = this.currentCollection.quizzes.filter(q => q.id !== this.currentQuiz.id);
+        this.currentCollection.quizCount = this.currentCollection.quizzes.length;
         this.currentQuiz = null;
+        console.log(`🗑️ 問題を削除: "${deletedQuestion}..." (問題集: ${this.currentCollection.name})`);
         this.updateQuizList();
         this.saveToLocalStorage();
     }
 
     saveQuiz() {
-        if (!this.currentCollection) {
-            alert('問題集を選択してください');
-            return;
-        }
+        if (!this.ensureCurrentCollectionReadyForEdit()) return;
 
         const question = document.getElementById('questionInput').value.trim();
         const answer = document.getElementById('answerInput').value.trim();
@@ -360,9 +775,12 @@ class QuizManager {
             this.currentCollection.quizzes[currentIndex] = quiz;
         } else {
             // 新規
+            if (!this.canAddQuizzesToCollection(this.currentCollection, 1)) return;
+            if (!this.canAddQuizzesToFolder(this.currentCollection.folder || this.defaultFolderName, 1)) return;
             this.currentCollection.quizzes.push(quiz);
             currentIndex = this.currentCollection.quizzes.length - 1;
         }
+        this.currentCollection.quizCount = this.currentCollection.quizzes.length;
 
         // 保存した問題を履歴に追加（問題集IDと問題IDのペアで保存）
         this.editHistory.push({
@@ -563,6 +981,8 @@ class QuizManager {
 
     // ================== UI更新 ==================
     updateUI() {
+        this.ensureFoldersFromCollections();
+        this.updateFolderList();
         this.updateCollectionList();
         this.updateQuizList();
         this.updateGenreFilters();
@@ -574,10 +994,13 @@ class QuizManager {
         const select = document.getElementById('collectionList');
         select.innerHTML = '';
 
-        this.collections.forEach(collection => {
+        const visibleCollections = this.getVisibleCollections();
+        visibleCollections.forEach(collection => {
             const option = document.createElement('option');
             option.value = collection.id;
-            option.textContent = `${collection.name} (${collection.quizzes.length}問)`;
+            const quizCount = this.getCollectionQuizCount(collection);
+            const status = this.isCollectionDownloaded(collection) ? '' : ' [未DL]';
+            option.textContent = `${collection.name} (${quizCount}問)${status}`;
             if (this.currentCollection && collection.id === this.currentCollection.id) {
                 option.selected = true;
             }
@@ -592,6 +1015,23 @@ class QuizManager {
     filterQuizzes() {
         if (!this.currentCollection) {
             document.getElementById('quizList').innerHTML = '<p style="padding:20px;">問題集を選択してください</p>';
+            return;
+        }
+
+        if (!this.isCollectionDownloaded(this.currentCollection)) {
+            const container = document.getElementById('quizList');
+            container.innerHTML = `
+                <p style="padding:20px;">この問題集は未ダウンロードです。開くときにクラウドから取得します。</p>
+                <div style="padding:0 20px 20px;">
+                    <button id="downloadCurrentCollectionBtn" class="btn btn-primary">この問題集をダウンロード</button>
+                </div>
+            `;
+            const btn = document.getElementById('downloadCurrentCollectionBtn');
+            if (btn) {
+                btn.addEventListener('click', async () => {
+                    await this.downloadCollectionIfNeeded(this.currentCollection);
+                });
+            }
             return;
         }
 
@@ -733,20 +1173,24 @@ class QuizManager {
         const container = document.getElementById('quizCollectionCheckboxes');
         container.innerHTML = '';
 
-        if (this.collections.length === 0) {
+        const visibleCollections = this.getVisibleCollections();
+        if (visibleCollections.length === 0) {
             container.innerHTML = '<p>問題集がありません</p>';
             return;
         }
 
-        this.collections.forEach(collection => {
+        visibleCollections.forEach(collection => {
             const label = document.createElement('label');
             const checkbox = document.createElement('input');
             checkbox.type = 'checkbox';
             checkbox.value = collection.id;
-            checkbox.checked = true;
+            checkbox.checked = this.isCollectionDownloaded(collection);
+            checkbox.disabled = !this.isCollectionDownloaded(collection);
 
             const textSpan = document.createElement('span');
-            textSpan.textContent = `${collection.name} (${collection.quizzes.length}問)`;
+            const quizCount = this.getCollectionQuizCount(collection);
+            const status = this.isCollectionDownloaded(collection) ? '' : ' [未DL]';
+            textSpan.textContent = `${collection.name} (${quizCount}問)${status}`;
 
             label.appendChild(checkbox);
             label.appendChild(textSpan);
@@ -767,7 +1211,7 @@ class QuizManager {
         let quizzes = [];
         checkboxes.forEach(checkbox => {
             const collection = this.collections.find(c => c.id === checkbox.value);
-            if (collection) {
+            if (collection && this.isCollectionDownloaded(collection)) {
                 // ディープコピーして元のデータに影響しないようにする
                 quizzes = quizzes.concat(collection.quizzes.map(q => ({...q})));
             }
@@ -1192,8 +1636,8 @@ class QuizManager {
     // ================== クラウド同期（手動モード）==================
     async uploadToCloud() {
         if (!this.syncEnabled || !window.firebaseSync) return;
-        
-        const totalQuizzes = this.collections.reduce((sum, c) => sum + (c.quizzes?.length || 0), 0);
+
+        const totalQuizzes = this.collections.reduce((sum, c) => sum + this.getCollectionQuizCount(c), 0);
         console.log(`📤 クラウドにアップロード中... (${this.collections.length}問題集, ${totalQuizzes}問)`);
         
         try {
@@ -1230,7 +1674,13 @@ class QuizManager {
                 const totalQuizzes = firestoreData.reduce((sum, c) => sum + (c.quizzes?.length || 0), 0);
                 this.updateSyncOverlay('✅ データを反映中...', `${firestoreData.length} 問題集・${totalQuizzes} 問をダウンロードしました`);
                 this.isLoadingFromFirestore = true;
-                this.collections = firestoreData;
+                this.collections = firestoreData.map(col => ({
+                    ...col,
+                    folder: col.folder || this.defaultFolderName,
+                    isCloudPlaceholder: false,
+                    isDownloaded: true,
+                    quizCount: Array.isArray(col.quizzes) ? col.quizzes.length : (col.quizCount || 0)
+                }));
                 if (this.collections.length > 0) {
                     this.currentCollection = this.collections[0];
                 }
@@ -1287,6 +1737,9 @@ class QuizManager {
         try {
             const data = {
                 collections: this.collections,
+                folders: this.folders,
+                selectedFolderId: this.selectedFolderId,
+                limits: this.limits,
                 candidates: this.candidates,
                 settings: this.settings,
                 saved_at: new Date().toISOString()
@@ -1303,12 +1756,10 @@ class QuizManager {
             }
             
             localStorage.setItem('quizManagerData', jsonData);
-            console.log(`✅ ローカルストレージに保存成功 (${dataSizeMB}MB, ${this.collections.length}問題集, ${this.collections.reduce((sum, c) => sum + (c.quizzes?.length || 0), 0)}問)`);
+            console.log(`✅ ローカルストレージに保存成功 (${dataSizeMB}MB, ${this.collections.length}問題集, ${this.collections.reduce((sum, c) => sum + this.getCollectionQuizCount(c), 0)}問)`);
 
-            // Firestoreにも同期（同期が有効な場合）- 即座にアップロード
-            if (this.syncEnabled && window.firebaseSync && !this.isLoadingFromFirestore) {
-                this.uploadToCloud();
-            }
+            // Firestore同期は即時ではなく遅延実行
+            this.scheduleCloudUpload();
         } catch (error) {
             console.error('❌ ローカルストレージへの保存に失敗:', error);
             
@@ -1342,10 +1793,16 @@ class QuizManager {
                     
                     // 各問題集のquizzesが配列であることを確認
                     this.collections.forEach(col => {
+                        if (!col.folder) {
+                            col.folder = this.defaultFolderName;
+                        }
                         if (!col.quizzes || !Array.isArray(col.quizzes)) {
                             console.warn(`⚠️ 問題集「${col.name}」のデータが不正です。修復します。`);
                             col.quizzes = [];
                         }
+                        col.quizCount = col.quizzes.length;
+                        if (typeof col.isDownloaded !== 'boolean') col.isDownloaded = true;
+                        if (typeof col.isCloudPlaceholder !== 'boolean') col.isCloudPlaceholder = false;
                     });
                 }
 
@@ -1358,8 +1815,17 @@ class QuizManager {
                 });
 
                 this.settings = parsed.settings || this.settings;
+                this.limits = parsed.limits || this.limits;
+                if (Array.isArray(parsed.folders) && parsed.folders.length > 0) {
+                    this.folders = parsed.folders;
+                }
+                this.selectedFolderId = parsed.selectedFolderId || this.selectedFolderId;
+                this.ensureFoldersFromCollections();
 
-                if (this.collections.length > 0) {
+                const visibleCollections = this.getVisibleCollections();
+                if (visibleCollections.length > 0) {
+                    this.currentCollection = visibleCollections[0];
+                } else if (this.collections.length > 0) {
                     this.currentCollection = this.collections[0];
                 }
 
@@ -1390,6 +1856,9 @@ class QuizManager {
     saveToFile() {
         const data = {
             collections: this.collections,
+            folders: this.folders,
+            selectedFolderId: this.selectedFolderId,
+            limits: this.limits,
             saved_at: new Date().toISOString()
         };
 
@@ -1473,6 +1942,15 @@ class QuizManager {
 
                 if (confirm('既存のデータを上書きしますか？（キャンセルで追加モード）')) {
                     this.collections = collections;
+                    if (Array.isArray(data.folders) && data.folders.length > 0) {
+                        this.folders = data.folders;
+                    }
+                    if (data.selectedFolderId) {
+                        this.selectedFolderId = data.selectedFolderId;
+                    }
+                    if (data.limits) {
+                        this.limits = data.limits;
+                    }
                     console.log('📝 上書きモード: 既存データを置換');
                 } else {
                     // 追加モード
@@ -1570,21 +2048,22 @@ class QuizManager {
             this.syncEnabled = true;
             localStorage.setItem('quizbook_sync_enabled', 'true');
 
-            // Firestoreからデータを読み込む
+            // 起動高速化のため、まずメタデータのみを取得
             this.showSyncOverlay('☁️ クラウドに接続中...', 'データを確認しています');
-            const firestoreData = await window.firebaseSync.loadCollections();
+            const metas = await window.firebaseSync.loadCollectionMetas();
             this.hideSyncOverlay();
-            if (firestoreData && firestoreData.length > 0) {
+            if (metas && metas.length > 0) {
                 const useFirestore = confirm(
                     '☁️ クラウドにデータが見つかりました\n\n' +
-                    `クラウド: ${firestoreData.length}個の問題集\n` +
+                    `クラウド: ${metas.length}個の問題集\n` +
                     `ローカル: ${this.collections.length}個の問題集\n\n` +
-                    'クラウドのデータを使用しますか？\n(キャンセル = ローカルを優先してクラウドに上書き)'
+                    'クラウドの問題集一覧を使用しますか？\n(問題本文は選択時にダウンロードされます)\n\n' +
+                    '(キャンセル = ローカルを優先してクラウドに上書き)'
                 );
 
                 if (useFirestore) {
                     this.isLoadingFromFirestore = true;
-                    this.collections = firestoreData;
+                    this.collections = this.buildCollectionsFromCloudMetas(metas);
                     if (this.collections.length > 0) {
                         this.currentCollection = this.collections[0];
                     }
@@ -1764,23 +2243,23 @@ class QuizManager {
 
         this.syncEnabled = true;
 
-        this.updateSyncOverlay('📥 データをダウンロード中...', 'クラウドから最新のデータを取得しています');
+        this.updateSyncOverlay('📥 問題集一覧を取得中...', 'クラウドからメタデータを取得しています');
 
-        // 起動時にクラウドの最新データを明示的に取得してからUIを更新
-        const firestoreData = await window.firebaseSync.loadCollections();
-        if (firestoreData && firestoreData.length > 0) {
-            const totalQuizzes = firestoreData.reduce((sum, c) => sum + (c.quizzes?.length || 0), 0);
-            this.updateSyncOverlay('✅ データを反映中...', `${firestoreData.length} 問題集・${totalQuizzes} 問を読み込みました`);
+        // 起動時はメタデータのみ読み込み（問題本文はオンデマンド）
+        const metas = await window.firebaseSync.loadCollectionMetas();
+        if (metas && metas.length > 0) {
+            const totalQuizzes = metas.reduce((sum, meta) => sum + (meta.quizCount || 0), 0);
+            this.updateSyncOverlay('✅ 問題集一覧を反映中...', `${metas.length} 問題集・${totalQuizzes} 問`);
 
             this.isLoadingFromFirestore = true;
-            this.collections = firestoreData;
+            this.collections = this.buildCollectionsFromCloudMetas(metas);
             if (this.collections.length > 0) {
                 this.currentCollection = this.collections[0];
             }
             this.updateUI();
             this.saveToLocalStorage();
             this.isLoadingFromFirestore = false;
-            console.log('✅ 起動時にクラウドの最新データを読み込みました');
+            console.log('✅ 起動時にクラウドの問題集一覧を読み込みました（本文はオンデマンド）');
         }
 
         this.updateSyncUI();
@@ -1864,12 +2343,23 @@ class QuizManager {
                 const collectionName = prompt('問題集の名前を入力してください:', file.name.replace('.csv', ''));
                 if (!collectionName) return;
 
+                const selectedFolder = this.getFolderById(this.selectedFolderId);
+                const folderName = selectedFolder ? selectedFolder.name : this.defaultFolderName;
+
                 const collection = {
                     id: Date.now().toString(),
                     name: collectionName,
                     quizzes: quizzes,
-                    created_at: new Date().toISOString()
+                    created_at: new Date().toISOString(),
+                    folder: folderName,
+                    isCloudPlaceholder: false,
+                    isDownloaded: true,
+                    quizCount: quizzes.length
                 };
+
+                if (!this.canAddCollectionToFolder(folderName)) return;
+                if (!this.canAddQuizzesToCollection(collection, quizzes.length)) return;
+                if (!this.canAddQuizzesToFolder(folderName, quizzes.length)) return;
 
                 this.collections.push(collection);
                 this.currentCollection = collection;
@@ -1888,6 +2378,10 @@ class QuizManager {
     exportCsv() {
         if (!this.currentCollection) {
             alert('エクスポートする問題集を選択してください');
+            return;
+        }
+        if (!this.isCollectionDownloaded(this.currentCollection)) {
+            alert('この問題集は未ダウンロードのためエクスポートできません。');
             return;
         }
 
@@ -2026,10 +2520,10 @@ class QuizManager {
             const sel = document.getElementById(id);
             const current = sel.value;
             sel.innerHTML = '<option value="">問題集を選択...</option>';
-            this.collections.forEach(col => {
+            this.collections.filter(col => this.isCollectionDownloaded(col)).forEach(col => {
                 const opt = document.createElement('option');
                 opt.value = col.id;
-                opt.textContent = `${col.name} (${col.quizzes.length}問)`;
+                opt.textContent = `${col.name} (${this.getCollectionQuizCount(col)}問)`;
                 sel.appendChild(opt);
             });
             if (current) sel.value = current;
@@ -2122,10 +2616,14 @@ class QuizManager {
         const toCol = this.collections.find(c => c.id === toId);
 
         const toMove = fromCol.quizzes.filter(q => fromSelected.has(q.id));
+        if (!this.canAddQuizzesToCollection(toCol, toMove.length)) return;
+        if (!this.canAddQuizzesToFolder(toCol.folder || this.defaultFolderName, toMove.length)) return;
         toMove.forEach(q => {
             toCol.quizzes.push({ ...q, id: Date.now().toString() + Math.random().toString(36).substr(2, 5) });
         });
         fromCol.quizzes = fromCol.quizzes.filter(q => !fromSelected.has(q.id));
+        toCol.quizCount = toCol.quizzes.length;
+        fromCol.quizCount = fromCol.quizzes.length;
         fromSelected.clear();
 
         this.saveToLocalStorage();
@@ -2146,9 +2644,12 @@ class QuizManager {
         const toCol = this.collections.find(c => c.id === toId);
 
         const toCopy = fromCol.quizzes.filter(q => fromSelected.has(q.id));
+        if (!this.canAddQuizzesToCollection(toCol, toCopy.length)) return;
+        if (!this.canAddQuizzesToFolder(toCol.folder || this.defaultFolderName, toCopy.length)) return;
         toCopy.forEach(q => {
             toCol.quizzes.push({ ...q, id: Date.now().toString() + Math.random().toString(36).substr(2, 5) });
         });
+        toCol.quizCount = toCol.quizzes.length;
 
         this.saveToLocalStorage();
         this.updateMoveCollectionSelects();
@@ -2162,6 +2663,7 @@ class QuizManager {
         // 非表示にするボタン（編集・保存系）
         const hideIds = [
             'saveBtn', 'importCsvBtn',
+            'newFolderBtn', 'renameFolderBtn', 'deleteFolderBtn', 'downloadFolderBtn', 'moveCollectionFolderBtn',
             'newCollectionBtn', 'renameCollectionBtn', 'deleteCollectionBtn',
             'newQuizBtn', 'deleteQuizBtn',
             'clearDataBtn'
@@ -2193,6 +2695,15 @@ class QuizManager {
         const totalQuizzes = this.collections.reduce((sum, c) => sum + (c.quizzes?.length || 0), 0);
 
         this.collections = [];
+        this.folders = [
+            {
+                id: 'folder_default',
+                name: this.defaultFolderName,
+                maxCollections: 50,
+                maxQuizzes: 5000
+            }
+        ];
+        this.selectedFolderId = 'folder_default';
         this.currentCollection = null;
         this.currentQuiz = null;
         localStorage.removeItem('quizManagerData');
