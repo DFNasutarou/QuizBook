@@ -48,6 +48,7 @@
                 <button id="renameFolderBtn" class="btn btn-secondary">フォルダ名変更</button>
                 <button id="deleteFolderBtn" class="btn btn-danger">フォルダ削除</button>
                 <button id="downloadFolderBtn" class="btn btn-secondary">フォルダ一括DL</button>
+                <select id="moveCollectionFolderTarget" class="folder-move-select"></select>
                 <button id="moveCollectionFolderBtn" class="btn btn-secondary">問題集をフォルダ移動</button>
                 <button id="newCollectionBtn" class="btn btn-primary">新規問題集</button>
                 <button id="renameCollectionBtn" class="btn btn-secondary">名前変更</button>
@@ -227,6 +228,10 @@
 
             <div class="quiz-filters" id="quizFilters">
                 <h3>出題設定</h3>
+                <div class="form-group">
+                    <label>フォルダを選択:</label>
+                    <div id="quizFolderCheckboxes"></div>
+                </div>
                 <div class="form-group">
                     <label>問題集を選択:</label>
                     <div id="quizCollectionCheckboxes"></div>

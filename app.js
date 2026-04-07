@@ -35,6 +35,9 @@ class QuizManager {
         this.limits = {
             maxQuizzesPerCollection: 500
         };
+        this.quizSelectionInitialized = false;
+        this.quizSelectedFolderNames = new Set();
+        this.quizSelectedCollectionIds = new Set();
 
         this.init();
     }
@@ -171,6 +174,27 @@ class QuizManager {
         });
 
         this.updateFolderStats();
+        this.updateMoveCollectionFolderTarget();
+    }
+
+    updateMoveCollectionFolderTarget() {
+        const select = document.getElementById('moveCollectionFolderTarget');
+        if (!select) return;
+
+        const currentFolder = this.currentCollection
+            ? (this.currentCollection.folder || this.defaultFolderName)
+            : '';
+
+        select.innerHTML = '<option value="">移動先フォルダ...</option>';
+        this.folders.forEach(folder => {
+            const option = document.createElement('option');
+            option.value = folder.name;
+            option.textContent = folder.name;
+            if (currentFolder && currentFolder === folder.name) {
+                option.selected = true;
+            }
+            select.appendChild(option);
+        });
     }
 
     updateFolderStats() {
@@ -280,12 +304,14 @@ class QuizManager {
             return;
         }
 
-        const targetName = prompt(
-            `移動先フォルダ名を入力してください。\n\n利用可能: ${this.folders.map(f => f.name).join(', ')}`,
-            this.currentCollection.folder || this.defaultFolderName
-        );
-        if (!targetName) return;
-        const folder = this.folders.find(f => f.name === targetName.trim());
+        const targetSelect = document.getElementById('moveCollectionFolderTarget');
+        const targetName = targetSelect ? targetSelect.value : '';
+        if (!targetName) {
+            alert('移動先フォルダを選択してください');
+            return;
+        }
+
+        const folder = this.folders.find(f => f.name === targetName);
         if (!folder) {
             alert('指定したフォルダは存在しません。');
             return;
@@ -509,6 +535,24 @@ class QuizManager {
         document.getElementById('moveCollectionFolderBtn').addEventListener('click', () => this.moveCurrentCollectionToFolder());
         document.getElementById('downloadFolderBtn').addEventListener('click', () => this.downloadCurrentFolderFromCloud());
 
+        const quizFolderCheckboxes = document.getElementById('quizFolderCheckboxes');
+        if (quizFolderCheckboxes) {
+            quizFolderCheckboxes.addEventListener('change', (e) => {
+                if (e.target && e.target.matches('input[type="checkbox"]')) {
+                    this.onQuizFolderSelectionChanged();
+                }
+            });
+        }
+
+        const quizCollectionCheckboxes = document.getElementById('quizCollectionCheckboxes');
+        if (quizCollectionCheckboxes) {
+            quizCollectionCheckboxes.addEventListener('change', (e) => {
+                if (e.target && e.target.matches('input[type="checkbox"]')) {
+                    this.onQuizCollectionSelectionChanged();
+                }
+            });
+        }
+
         // 問題管理
         document.getElementById('newQuizBtn').addEventListener('click', () => this.newQuiz());
         document.getElementById('deleteQuizBtn').addEventListener('click', () => this.deleteQuiz());
@@ -688,6 +732,7 @@ class QuizManager {
         }
 
         this.updateQuizList();
+        this.updateMoveCollectionFolderTarget();
     }
 
     async startQuizFromCollection() {
@@ -702,15 +747,11 @@ class QuizManager {
         // 出題タブに切り替え
         this.switchTab('quiz');
 
-        // すべてのチェックボックスを外す
-        const checkboxes = document.querySelectorAll('#quizCollectionCheckboxes input[type="checkbox"]');
-        checkboxes.forEach(cb => cb.checked = false);
-
-        // 現在の問題集だけをチェック
-        const targetCheckbox = Array.from(checkboxes).find(cb => cb.value === this.currentCollection.id);
-        if (targetCheckbox) {
-            targetCheckbox.checked = true;
-        }
+        this.quizSelectionInitialized = true;
+        this.quizSelectedFolderNames = new Set([this.currentCollection.folder || this.defaultFolderName]);
+        this.quizSelectedCollectionIds = new Set([this.currentCollection.id]);
+        this.updateQuizFolderCheckboxes();
+        this.updateQuizCollectionCheckboxes();
 
         // 出題を開始
         this.startQuizMode();
@@ -986,6 +1027,7 @@ class QuizManager {
         this.updateCollectionList();
         this.updateQuizList();
         this.updateGenreFilters();
+        this.updateQuizFolderCheckboxes();
         this.updateQuizCollectionCheckboxes();
         this.updateMoveCollectionSelects();
     }
@@ -1169,27 +1211,95 @@ class QuizManager {
         });
     }
 
-    updateQuizCollectionCheckboxes() {
-        const container = document.getElementById('quizCollectionCheckboxes');
+    syncQuizSelectionState() {
+        const folderNames = this.folders.map(folder => folder.name);
+        const collectionIds = new Set(this.collections.map(collection => collection.id));
+
+        if (!this.quizSelectionInitialized) {
+            this.quizSelectedFolderNames = new Set(folderNames);
+            this.quizSelectedCollectionIds = new Set(
+                this.collections
+                    .filter(collection => this.isCollectionDownloaded(collection))
+                    .map(collection => collection.id)
+            );
+            this.quizSelectionInitialized = true;
+            return;
+        }
+
+        this.quizSelectedFolderNames = new Set(
+            [...this.quizSelectedFolderNames].filter(name => folderNames.includes(name))
+        );
+        if (this.quizSelectedFolderNames.size === 0 && folderNames.length > 0) {
+            this.quizSelectedFolderNames = new Set(folderNames);
+        }
+
+        this.quizSelectedCollectionIds = new Set(
+            [...this.quizSelectedCollectionIds].filter(id => collectionIds.has(id))
+        );
+    }
+
+    updateQuizFolderCheckboxes() {
+        const container = document.getElementById('quizFolderCheckboxes');
+        if (!container) return;
+
+        this.syncQuizSelectionState();
         container.innerHTML = '';
 
-        const visibleCollections = this.getVisibleCollections();
-        if (visibleCollections.length === 0) {
+        if (this.folders.length === 0) {
+            container.innerHTML = '<p>フォルダがありません</p>';
+            return;
+        }
+
+        this.folders.forEach(folder => {
+            const usage = this.getFolderUsage(folder.name);
+            const label = document.createElement('label');
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.value = folder.name;
+            checkbox.checked = this.quizSelectedFolderNames.has(folder.name);
+
+            const textSpan = document.createElement('span');
+            textSpan.textContent = `${folder.name} (${usage.collectionCount}集)`;
+
+            label.appendChild(checkbox);
+            label.appendChild(textSpan);
+            container.appendChild(label);
+        });
+    }
+
+    updateQuizCollectionCheckboxes() {
+        const container = document.getElementById('quizCollectionCheckboxes');
+        if (!container) return;
+
+        this.syncQuizSelectionState();
+        container.innerHTML = '';
+
+        const selectedFolders = this.quizSelectedFolderNames;
+        const targetCollections = this.collections.filter(collection =>
+            selectedFolders.has(collection.folder || this.defaultFolderName)
+        );
+
+        if (targetCollections.length === 0) {
             container.innerHTML = '<p>問題集がありません</p>';
             return;
         }
 
-        visibleCollections.forEach(collection => {
+        targetCollections.forEach(collection => {
+            const downloadable = this.isCollectionDownloaded(collection);
+            if (!downloadable) {
+                this.quizSelectedCollectionIds.delete(collection.id);
+            }
+
             const label = document.createElement('label');
             const checkbox = document.createElement('input');
             checkbox.type = 'checkbox';
             checkbox.value = collection.id;
-            checkbox.checked = this.isCollectionDownloaded(collection);
-            checkbox.disabled = !this.isCollectionDownloaded(collection);
+            checkbox.checked = downloadable && this.quizSelectedCollectionIds.has(collection.id);
+            checkbox.disabled = !downloadable;
 
             const textSpan = document.createElement('span');
             const quizCount = this.getCollectionQuizCount(collection);
-            const status = this.isCollectionDownloaded(collection) ? '' : ' [未DL]';
+            const status = downloadable ? '' : ' [未DL]';
             textSpan.textContent = `${collection.name} (${quizCount}問)${status}`;
 
             label.appendChild(checkbox);
@@ -1198,19 +1308,37 @@ class QuizManager {
         });
     }
 
+    onQuizFolderSelectionChanged() {
+        const checkboxes = document.querySelectorAll('#quizFolderCheckboxes input[type="checkbox"]:checked');
+        this.quizSelectedFolderNames = new Set(Array.from(checkboxes).map(checkbox => checkbox.value));
+        this.updateQuizCollectionCheckboxes();
+    }
+
+    onQuizCollectionSelectionChanged() {
+        const allDisplayed = document.querySelectorAll('#quizCollectionCheckboxes input[type="checkbox"]');
+        const checkedDisplayed = document.querySelectorAll('#quizCollectionCheckboxes input[type="checkbox"]:checked');
+
+        allDisplayed.forEach(checkbox => this.quizSelectedCollectionIds.delete(checkbox.value));
+        checkedDisplayed.forEach(checkbox => this.quizSelectedCollectionIds.add(checkbox.value));
+    }
+
     // ================== 出題機能 ==================
     startQuizMode() {
-        // 選択された問題集から問題を集める
-        const checkboxes = document.querySelectorAll('#quizCollectionCheckboxes input[type="checkbox"]:checked');
+        this.syncQuizSelectionState();
 
-        if (checkboxes.length === 0) {
+        if (this.quizSelectedCollectionIds.size === 0) {
             alert('出題する問題集を選択してください');
             return;
         }
 
+        const selectedFolders = this.quizSelectedFolderNames;
+        const selectedCollections = this.collections.filter(collection =>
+            selectedFolders.has(collection.folder || this.defaultFolderName) &&
+            this.quizSelectedCollectionIds.has(collection.id)
+        );
+
         let quizzes = [];
-        checkboxes.forEach(checkbox => {
-            const collection = this.collections.find(c => c.id === checkbox.value);
+        selectedCollections.forEach(collection => {
             if (collection && this.isCollectionDownloaded(collection)) {
                 // ディープコピーして元のデータに影響しないようにする
                 quizzes = quizzes.concat(collection.quizzes.map(q => ({...q})));

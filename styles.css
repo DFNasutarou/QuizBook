@@ -299,6 +299,15 @@ h1 {
     border-bottom: 2px solid var(--border-color);
 }
 
+.folder-move-select {
+    min-width: 180px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: white;
+    font-size: 14px;
+}
+
 /* スプリットパネル */
 .split-panel {
     display: grid;
@@ -594,6 +603,27 @@ h1 {
     background: #f8f9fa;
     border-radius: 4px;
     border: 1px solid var(--border-color);
+}
+
+#quizFolderCheckboxes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 12px;
+    background: #f8f9fa;
+    border-radius: 4px;
+    border: 1px solid var(--border-color);
+    margin-bottom: 10px;
+}
+
+#quizFolderCheckboxes label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    background: white;
+    border-radius: 4px;
+    cursor: pointer;
 }
 
 #quizCollectionCheckboxes label {
