@@ -24,10 +24,6 @@
                 <button id="cloudDownloadBtn" class="btn btn-secondary" title="クラウドからダウンロード" style="display:none;">
                     <span>📥 ダウンロード</span>
                 </button>
-                <button id="saveBtn" class="btn btn-primary">保存</button>
-                <button id="loadBtn" class="btn btn-secondary">読み込み</button>
-                <button id="importCsvBtn" class="btn btn-secondary">CSV インポート</button>
-                <button id="exportCsvBtn" class="btn btn-secondary">CSV エクスポート</button>
                 <a href="?view" class="btn btn-secondary view-mode-link" title="閲覧モードで開く">👁 閲覧モード</a>
             </div>
         </header>
@@ -46,28 +42,38 @@
 
         <!-- 問題集管理タブ -->
         <div id="manage-tab" class="tab-content active">
-            <div class="toolbar">
-                <button id="newFolderBtn" class="btn btn-secondary">新規フォルダ</button>
-                <button id="renameFolderBtn" class="btn btn-secondary">フォルダ名変更</button>
-                <button id="deleteFolderBtn" class="btn btn-danger">フォルダ削除</button>
-                <button id="downloadFolderBtn" class="btn btn-secondary">フォルダ一括DL</button>
-                <button id="newCollectionBtn" class="btn btn-primary">新規問題集</button>
-                <button id="renameCollectionBtn" class="btn btn-secondary">名前変更</button>
-                <button id="deleteCollectionBtn" class="btn btn-danger">問題集削除</button>
-            </div>
-
             <div class="split-panel">
                 <div class="panel">
-                    <h3>フォルダ一覧</h3>
-                    <select id="folderList" size="6"></select>
+                    <div class="list-header">
+                        <h3>フォルダ一覧</h3>
+                        <div class="list-toolbar">
+                            <button id="newFolderBtn" class="btn btn-sm btn-primary" title="新規フォルダを作成">＋</button>
+                            <button id="downloadFolderBtn" class="btn btn-sm btn-secondary" title="フォルダ内の問題集を一括ダウンロード">DL</button>
+                        </div>
+                    </div>
+                    <select id="folderList" size="6" class="context-menu-target"></select>
                     <div id="folderStats" class="folder-stats"></div>
 
-                    <h3>問題集一覧</h3>
-                    <select id="collectionList" size="10"></select>
-                </div>
-                <div class="panel">
-                    <h3>問題一覧</h3>
-                    <div class="filter-controls">
+                    <div class="list-header">
+                        <h3>問題集一覧</h3>
+                        <div class="list-toolbar">
+                            <button id="newCollectionBtn" class="btn btn-sm btn-primary" title="新規問題集を作成">＋</button>
+                            <button id="collectionDownloadBtn" class="btn btn-sm btn-secondary" title="問題集をダウンロード">DL</button>
+                            <button id="importCsvBtn" class="btn btn-sm btn-secondary" title="CSVから問題をインポート">読込</button>
+                        </div>
+                    </div>
+                    <select id="collectionList" size="10" class="context-menu-target"></select>
+
+                    <div class="sync-legend">
+                        <div class="legend-title">同期状態</div>
+                        <div class="legend-item">🟢 同期済み</div>
+                        <div class="legend-item">🟡 同期中</div>
+                        <div class="legend-item">🔴 エラー</div>
+                        <div class="legend-item">⚪ 未同期</div>
+                    </div>
+
+                    <h3>問題一覧フィルター</h3>
+                    <div class="filter-controls manage-side-filters">
                         <input type="text" id="searchBox" placeholder="検索...">
                         <select id="genreFilter">
                             <option value="">全ジャンル</option>
@@ -79,6 +85,8 @@
                             <option value="3">難</option>
                         </select>
                     </div>
+                </div>
+                <div class="panel">
                     <div id="quizList" class="quiz-list"></div>
                 </div>
             </div>
@@ -410,6 +418,13 @@
             <div id="syncOverlayMessage" class="sync-overlay-message">クラウドと同期中...</div>
             <div id="syncOverlayDetail" class="sync-overlay-detail"></div>
         </div>
+    </div>
+
+    <!-- コンテキストメニュー -->
+    <div id="contextMenu" class="context-menu" style="display: none;">
+        <div class="context-menu-item" data-action="rename">📝 名前変更</div>
+        <div class="context-menu-item" data-action="delete">🗑️ 削除</div>
+        <div class="context-menu-item" data-action="csv-export" style="display: none;">📊 CSV出力</div>
     </div>
 
     <script src="firebase-sync.js"></script>

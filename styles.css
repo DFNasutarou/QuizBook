@@ -30,36 +30,50 @@ body {
     background-color: var(--bg-color);
     color: var(--text-color);
     line-height: 1.6;
+    min-height: 100dvh;
 }
 
 .container {
-    max-width: 1600px;
-    margin: 0 auto;
-    padding: 20px;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 10px 12px;
+    min-height: 100dvh;
+    display: grid;
+    grid-template-columns: 320px minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
+    gap: 0 16px;
 }
 
 header {
     background: white;
-    padding: 20px;
+    padding: 14px;
     border-radius: 8px;
     box-shadow: var(--shadow);
-    margin-bottom: 20px;
+    margin-bottom: 12px;
     display: flex;
-    justify-content: space-between;
-    align-items: center;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    grid-column: 1;
 }
 
 h1 {
-    font-size: 24px;
+    font-size: 22px;
     color: var(--primary-color);
 }
 
 .header-controls {
     display: flex;
-    gap: 10px;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    white-space: nowrap;
+    gap: 6px;
+    flex-wrap: wrap;
+    overflow-x: visible;
+    white-space: normal;
+}
+
+.header-controls .btn {
+    font-size: 12px;
+    padding: 6px 10px;
 }
 
 .sync-summary {
@@ -67,10 +81,11 @@ h1 {
     border: 1px solid var(--border-color);
     border-radius: 8px;
     box-shadow: var(--shadow);
-    padding: 8px 12px;
+    padding: 6px 10px;
     margin-bottom: 12px;
-    font-size: 13px;
+    font-size: 12px;
     color: #495057;
+    grid-column: 1;
 }
 
 /* 閲覧モードバナー */
@@ -272,10 +287,13 @@ h1 {
     display: flex;
     flex-direction: column;
     gap: 6px;
-    width: 220px;
-    float: left;
-    margin-right: 16px;
+    width: 320px;
+    margin-right: 0;
     margin-bottom: 0;
+    grid-column: 1;
+    grid-row: 3;
+    min-height: 0;
+    overflow-y: auto;
 }
 
 .tab-btn {
@@ -304,8 +322,11 @@ h1 {
     padding: 20px;
     border-radius: 8px;
     box-shadow: var(--shadow);
-    min-height: 500px;
-    margin-left: 236px;
+    min-height: 0;
+    margin-left: 0;
+    grid-column: 2;
+    grid-row: 1 / 4;
+    overflow: hidden;
 }
 
 .tab-content.active {
@@ -325,6 +346,35 @@ h1 {
     white-space: nowrap;
 }
 
+.manage-toolbar {
+    gap: 8px;
+    align-items: stretch;
+    padding-bottom: 10px;
+}
+
+.toolbar-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 6px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: #fafafa;
+}
+
+.toolbar-group-label {
+    font-size: 11px;
+    color: #6b7280;
+    font-weight: 600;
+    margin-right: 2px;
+}
+
+.manage-toolbar .btn {
+    font-size: 12px;
+    padding: 5px 8px;
+    min-height: 28px;
+}
+
 .folder-move-select {
     min-width: 180px;
     padding: 8px 10px;
@@ -339,11 +389,13 @@ h1 {
     display: grid;
     grid-template-columns: 1fr 2fr;
     gap: 20px;
+    min-height: 0;
 }
 
 .panel {
     display: flex;
     flex-direction: column;
+    min-height: 0;
 }
 
 .panel h3 {
@@ -398,6 +450,55 @@ h1 {
     border-radius: 4px;
     max-height: 500px;
     overflow-y: auto;
+}
+
+#manage-tab.tab-content.active {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+#manage-tab .split-panel {
+    flex: 1;
+    grid-template-columns: 340px minmax(0, 1fr);
+}
+
+#manage-tab .panel:nth-child(1) {
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+#manage-tab .panel:nth-child(2) {
+    min-height: 0;
+}
+
+#manage-tab #quizList {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+}
+
+#manage-tab .manage-side-filters {
+    flex-direction: column;
+    align-items: stretch;
+    margin-top: 6px;
+}
+
+#manage-tab .manage-side-filters input,
+#manage-tab .manage-side-filters select {
+    width: 100%;
+}
+
+#quiz-organize-tab.tab-content.active {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+#quiz-organize-tab #quizManageList {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
 }
 
 .quiz-item {
@@ -945,6 +1046,8 @@ h1 {
 @media (max-width: 768px) {
     .container {
         padding: 8px;
+        display: block;
+        min-height: auto;
     }
 
     header {
@@ -952,6 +1055,7 @@ h1 {
         gap: 12px;
         padding: 12px;
         align-items: stretch;
+        grid-column: auto;
     }
 
     h1 {
@@ -979,12 +1083,12 @@ h1 {
     }
 
     .tabs {
-        float: none;
         width: auto;
         margin-right: 0;
         margin-bottom: 10px;
         flex-direction: row;
         overflow-x: auto;
+        overflow-y: hidden;
         gap: 3px;
         -webkit-overflow-scrolling: touch;
     }
@@ -1000,6 +1104,21 @@ h1 {
         margin-left: 0;
         padding: 12px;
         min-height: auto;
+        overflow: visible;
+    }
+
+    #manage-tab.tab-content.active,
+    #quiz-organize-tab.tab-content.active {
+        height: auto;
+    }
+
+    #manage-tab #quizList,
+    #quiz-organize-tab #quizManageList {
+        max-height: 50vh;
+    }
+
+    #manage-tab .split-panel {
+        grid-template-columns: 1fr;
     }
 
     .toolbar {
@@ -1274,4 +1393,108 @@ option {
 .collection-item .sync-badge.pending {
     background-color: #F5F5F5;
     color: #616161;
+}
+
+/* リストヘッダー＆ツールバー */
+.list-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    margin-top: 16px;
+    gap: 10px;
+}
+
+.list-header h3 {
+    flex: 1;
+    margin: 0;
+    font-size: 15px;
+    color: var(--primary-color);
+}
+
+.list-toolbar {
+    display: flex;
+    gap: 4px;
+}
+
+/* 小型ボタン */
+.btn-sm {
+    padding: 6px 10px;
+    font-size: 13px;
+    min-height: 28px;
+}
+
+/* コンテキストメニュー */
+.context-menu {
+    position: fixed;
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    z-index: 10000;
+    min-width: 150px;
+}
+
+.context-menu-item {
+    padding: 10px 16px;
+    cursor: pointer;
+    font-size: 14px;
+    user-select: none;
+    transition: background 0.15s;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.context-menu-item:last-child {
+    border-bottom: none;
+}
+
+.context-menu-item:hover {
+    background: #f0f7ff;
+    color: var(--primary-color);
+}
+
+/* インライン編集入力欄 */
+.inline-edit-input {
+    width: 100%;
+    padding: 8px;
+    border: 2px solid var(--primary-color);
+    border-radius: 4px;
+    font-size: 14px;
+    font-family: inherit;
+}
+
+/* 同期状態凡例 */
+.sync-legend {
+    margin-top: 12px;
+    padding: 10px;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    background: #fafbfc;
+    font-size: 13px;
+}
+
+.legend-title {
+    font-weight: 600;
+    color: #6b7280;
+    margin-bottom: 6px;
+    font-size: 12px;
+}
+
+.legend-item {
+    padding: 3px 0;
+    color: #4b5563;
+    line-height: 1.4;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.legend-item::before {
+    content: '';
+    display: inline-block;
+}
+
+.legend-item {
+    white-space: nowrap;
 }
