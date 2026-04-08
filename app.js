@@ -640,10 +640,15 @@ class QuizManager {
         const contextMenu = document.getElementById('contextMenu');
         if (contextMenu) {
             contextMenu.addEventListener('click', (e) => {
+                console.log('🔍 [DEBUG] コンテキストメニューがクリックされました');
                 if (e.target.classList.contains('context-menu-item')) {
                     const action = e.target.dataset.action;
+                    console.log(`🔍 [DEBUG] メニューアイテムクリック: ${action}`);
+                    e.stopPropagation(); // ドキュメントクリックへの伝播を防ぐ
                     this.handleContextMenuAction(action);
                     this.hideContextMenu();
+                } else {
+                    console.log('🔍 [DEBUG] メニュー外をクリック');
                 }
             });
         }
@@ -651,16 +656,21 @@ class QuizManager {
 
     showContextMenu(e, type) {
         e.preventDefault();
+        console.log(`🔍 [DEBUG] 右クリックメニュー表示: type=${type}`);
         this.contextMenuType = type;
         
         if (type === 'collection') {
             const selectedIdx = e.target.selectedIndex;
+            console.log(`🔍 [DEBUG] 選択インデックス: ${selectedIdx}`);
             if (selectedIdx < 0) return;
             this.contextMenuTarget = this.getVisibleCollections()[selectedIdx];
+            console.log(`🔍 [DEBUG] 対象問題集:`, this.contextMenuTarget?.name);
         } else if (type === 'folder') {
             const selectedIdx = e.target.selectedIndex;
+            console.log(`🔍 [DEBUG] 選択インデックス: ${selectedIdx}`);
             if (selectedIdx < 0) return;
             this.contextMenuTarget = this.folders[selectedIdx];
+            console.log(`🔍 [DEBUG] 対象フォルダ:`, this.contextMenuTarget?.name, `ID: ${this.contextMenuTarget?.id}`);
         }
 
         const contextMenu = document.getElementById('contextMenu');
@@ -682,30 +692,50 @@ class QuizManager {
     }
 
     handleContextMenuAction(action) {
-        if (!this.contextMenuTarget) return;
+        console.log(`🔍 [DEBUG] コンテキストメニューアクション: action=${action}, type=${this.contextMenuType}`);
+        console.log(`🔍 [DEBUG] 対象:`, this.contextMenuTarget);
+        
+        if (!this.contextMenuTarget) {
+            console.warn('⚠️ contextMenuTarget が null です');
+            return;
+        }
 
         if (action === 'rename') {
+            console.log('🔍 [DEBUG] 名前変更処理を開始');
             this.startInlineEdit(this.contextMenuType);
         } else if (action === 'delete') {
+            console.log('🔍 [DEBUG] 削除処理を開始');
             this.deleteFromContextMenu(this.contextMenuType);
         } else if (action === 'csv-export') {
+            console.log('🔍 [DEBUG] CSV出力処理を開始');
             this.exportCollectionAsCSV(this.contextMenuTarget);
         }
     }
 
     startInlineEdit(type) {
+        console.log(`🔍 [DEBUG] startInlineEdit開始: type=${type}`);
         const target = this.contextMenuTarget;
+        console.log('🔍 [DEBUG] target:', target);
         const listElement = (type === 'folder') 
             ? document.getElementById('folderList')
             : document.getElementById('collectionList');
         
-        if (!listElement) return;
+        console.log('🔍 [DEBUG] listElement:', listElement);
+        if (!listElement) {
+            console.warn('⚠️ リスト要素が見つかりません');
+            return;
+        }
 
         const selectedIdx = listElement.selectedIndex;
-        if (selectedIdx < 0) return;
+        console.log(`🔍 [DEBUG] selectedIdx: ${selectedIdx}`);
+        if (selectedIdx < 0) {
+            console.warn('⚠️ 選択されているアイテムがありません');
+            return;
+        }
 
         const option = listElement.options[selectedIdx];
         const oldName = option.text.split(' 🟢🟡🔴⚪')[0].trim();
+        console.log(`🔍 [DEBUG] 現在の名前: "${oldName}"`);
         
         // 現在のオプションを一時的に削除
         option.remove();
@@ -718,10 +748,13 @@ class QuizManager {
         
         // optionの代わりにinputを作成（select内に直接は入れられないので、代替手段を使用）
         // select内に直接入力欄は入れられないため、ユーザー入力を促すダイアログを使う
+        console.log('🔍 [DEBUG] プロンプトダイアログを表示します...');
         const newName = prompt('新しい名前を入力してください:', oldName);
+        console.log(`🔍 [DEBUG] 入力された名前: "${newName}"`);
         
         if (newName && newName !== oldName) {
             if (type === 'folder') {
+                console.log('🔍 [DEBUG] フォルダ名変更を実行');
                 this.renameFolderInline(target, newName);
             } else {
                 this.renameCollectionInline(target, newName);
