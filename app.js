@@ -657,16 +657,27 @@ class QuizManager {
     showContextMenu(e, type) {
         e.preventDefault();
         console.log(`🔍 [DEBUG] 右クリックメニュー表示: type=${type}`);
+        console.log(`🔍 [DEBUG] e.target:`, e.target);
+        console.log(`🔍 [DEBUG] e.currentTarget:`, e.currentTarget);
         this.contextMenuType = type;
         
+        // selectタグを確実に取得（e.targetがoptionの場合もあるため）
+        const selectElement = e.currentTarget.tagName === 'SELECT' ? e.currentTarget : e.target.closest('select');
+        console.log(`🔍 [DEBUG] selectElement:`, selectElement);
+        
+        if (!selectElement) {
+            console.warn('⚠️ select要素が見つかりません');
+            return;
+        }
+        
         if (type === 'collection') {
-            const selectedIdx = e.target.selectedIndex;
+            const selectedIdx = selectElement.selectedIndex;
             console.log(`🔍 [DEBUG] 選択インデックス: ${selectedIdx}`);
             if (selectedIdx < 0) return;
             this.contextMenuTarget = this.getVisibleCollections()[selectedIdx];
             console.log(`🔍 [DEBUG] 対象問題集:`, this.contextMenuTarget?.name);
         } else if (type === 'folder') {
-            const selectedIdx = e.target.selectedIndex;
+            const selectedIdx = selectElement.selectedIndex;
             console.log(`🔍 [DEBUG] 選択インデックス: ${selectedIdx}`);
             if (selectedIdx < 0) return;
             this.contextMenuTarget = this.folders[selectedIdx];
