@@ -113,6 +113,11 @@ class FirebaseSync {
         return doc(this.db, 'users', this.userId, 'meta', 'summary');
     }
 
+    getFoldersDocRef() {
+        const { doc } = window.firebaseUtils;
+        return doc(this.db, 'users', this.userId, 'meta', 'folders');
+    }
+
     getCollectionDocRef(collectionId) {
         const { doc } = window.firebaseUtils;
         return doc(this.db, 'users', this.userId, 'collections', collectionId);
@@ -149,6 +154,22 @@ class FirebaseSync {
         return summarySnap.data();
     }
 
+    async readFolders() {
+        const { getDoc } = window.firebaseUtils;
+        const foldersSnap = await getDoc(this.getFoldersDocRef());
+        if (!foldersSnap.exists()) return null;
+        return foldersSnap.data();
+    }
+
+    async writeFolders(folders) {
+        const { setDoc } = window.firebaseUtils;
+        await setDoc(this.getFoldersDocRef(), {
+            schemaVersion: 1,
+            updatedAt: new Date().toISOString(),
+            folders: folders || []
+        });
+    }
+
     async writeSummary(metas) {
         const { setDoc } = window.firebaseUtils;
         const totalQuizzes = metas.reduce((sum, meta) => sum + (meta.quizCount || 0), 0);
@@ -159,6 +180,48 @@ class FirebaseSync {
             totalQuizzes: totalQuizzes,
             collections: metas
         });
+    }
+
+    async loadFolders() {
+        if (!this.syncEnabled || !this.db) {
+            console.log('ℹ️ フォルダ構成の読み込みはスキップされました（同期が無効またはDBが未接続）');
+            return null;
+        }
+
+        try {
+            const foldersData = await this.readFolders();
+            if (foldersData && Array.isArray(foldersData.folders)) {
+                console.log(`✅ フォルダ構成をクラウドから読み込みました (${foldersData.folders.length}個)`);
+                return foldersData.folders;
+            }
+            console.log('ℹ️ クラウドにフォルダ構成が見つかりません（初回使用）');
+            return null;
+        } catch (error) {
+            console.error('❌ フォルダ構成の読み込みエラー:', error);
+            return null;
+        }
+    }
+
+    async saveFolders(folders) {
+        if (!this.syncEnabled || !this.db) {
+            console.log('ℹ️ フォルダ構成の保存はスキップされました（同期が無効またはDBが未接続）');
+            return;
+        }
+
+        try {
+            console.log(`📤 フォルダ構成をクラウドに保存中... (${folders.length}個)`);
+            await this.writeFolders(folders);
+            console.log('✅ フォルダ構成をクラウドに保存しました');
+        } catch (error) {
+            console.error('❌ フォルダ構成の保存エラー:', error);
+            throw error;
+        }
+    }
+
+    setCollectionSyncStatus(collection, status) {
+        if (!collection) return;
+        collection.syncStatus = status; // 'synced' | 'syncing' | 'error' | 'pending'
+        collection.syncUpdatedAt = new Date().toISOString();
     }
 
     async migrateLegacyIfNeeded() {
@@ -256,6 +319,13 @@ class FirebaseSync {
                 if (!collection || !collection.id) continue;
 
                 const meta = this.buildCollectionMeta(collection);
+                // 同期状態を保存（UI から参照される）
+                if (collection.syncStatus) {
+                    meta.syncStatus = collection.syncStatus;
+                }
+                if (collection.syncUpdatedAt) {
+                    meta.syncUpdatedAt = collection.syncUpdatedAt;
+                }
                 nextMetas.push(meta);
                 nextIdSet.add(collection.id);
 
@@ -268,6 +338,8 @@ class FirebaseSync {
                     ...sanitized,
                     updatedAt: new Date().toISOString()
                 });
+                // クラウド保存成功後に状態を 'synced' に
+                this.setCollectionSyncStatus(collection, 'synced');
             }
 
             for (const previousId of previousIdSet) {

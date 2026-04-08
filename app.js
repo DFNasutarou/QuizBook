@@ -1084,7 +1084,25 @@ class QuizManager {
             option.value = collection.id;
             const quizCount = this.getCollectionQuizCount(collection);
             const status = this.isCollectionDownloaded(collection) ? '' : ' [未DL]';
-            option.textContent = `${collection.name} (${quizCount}問)${status}`;
+            
+            // 同期状態インジケーター
+            let syncIndicator = '';
+            const syncStatus = collection.syncStatus;
+            if (syncStatus === 'synced') {
+                syncIndicator = ' 🟢';
+                option.style.backgroundColor = '#E8F5E9'; // 薄緑
+            } else if (syncStatus === 'syncing') {
+                syncIndicator = ' 🟡';
+                option.style.backgroundColor = '#FFF9C4'; // 薄黄
+            } else if (syncStatus === 'error') {
+                syncIndicator = ' 🔴';
+                option.style.backgroundColor = '#FFEBEE'; // 薄赤
+            } else if (syncStatus === 'pending') {
+                syncIndicator = ' ⚪';
+                option.style.backgroundColor = '#F5F5F5'; // 薄灰
+            }
+
+            option.textContent = `${collection.name} (${quizCount}問)${status}${syncIndicator}`;
             if (this.currentCollection && collection.id === this.currentCollection.id) {
                 option.selected = true;
             }
@@ -1935,12 +1953,33 @@ class QuizManager {
         console.log(`📤 クラウドにアップロード中... (${this.collections.length}問題集, ${totalQuizzes}問)`);
         
         try {
-            await window.firebaseSync.saveCollections(this.collections);
+            // 各 collection を syncing 状態に設定
+            this.collections.forEach(col => {
+                if (col) window.firebaseSync.setCollectionSyncStatus(col, 'syncing');
+            });
+            this.updateCollectionsList();
+
+            // Collection と フォルダ構成を同時に保存
+            await Promise.all([
+                window.firebaseSync.saveCollections(this.collections),
+                window.firebaseSync.saveFolders(this.folders)
+            ]);
+
+            // 全て synced 状態に
+            this.collections.forEach(col => {
+                if (col) window.firebaseSync.setCollectionSyncStatus(col, 'synced');
+            });
+            this.updateCollectionsList();
+
             console.log('✅ クラウドにアップロード成功');
             this.setLastSync('成功', `${this.collections.length}問題集・${totalQuizzes}問`);
             this.showNotification(`<strong>☁️ クラウドに保存しました</strong><br><small>${this.collections.length}問題集・${totalQuizzes}問を同期</small>`, 'success');
         } catch (err) {
             console.error('❌ クラウドアップロードエラー:', err);
+            this.collections.forEach(col => {
+                if (col) window.firebaseSync.setCollectionSyncStatus(col, 'error');
+            });
+            this.updateCollectionsList();
             this.setLastSync('失敗', err.message || '保存エラー');
             this.showNotification(`<strong>⚠️ クラウド保存に失敗</strong><br><small>${err.message}</small>`, 'error');
         }
@@ -1964,19 +2003,35 @@ class QuizManager {
         this.showSyncOverlay('📥 ダウンロード中...', 'クラウドからデータを取得しています');
         
         try {
-            const firestoreData = await window.firebaseSync.loadCollections();
+            // Collection と フォルダ構成を同時に読み込み
+            const [firestoreData, cloudFolders] = await Promise.all([
+                window.firebaseSync.loadCollections(),
+                window.firebaseSync.loadFolders()
+            ]);
             
             if (firestoreData && firestoreData.length > 0) {
                 const totalQuizzes = firestoreData.reduce((sum, c) => sum + (c.quizzes?.length || 0), 0);
                 this.updateSyncOverlay('✅ データを反映中...', `${firestoreData.length} 問題集・${totalQuizzes} 問をダウンロードしました`);
+                
                 this.isLoadingFromFirestore = true;
+                
+                // Collection を設定
                 this.collections = firestoreData.map(col => ({
                     ...col,
                     folder: col.folder || this.defaultFolderName,
                     isCloudPlaceholder: false,
                     isDownloaded: true,
-                    quizCount: Array.isArray(col.quizzes) ? col.quizzes.length : (col.quizCount || 0)
+                    quizCount: Array.isArray(col.quizzes) ? col.quizzes.length : (col.quizCount || 0),
+                    syncStatus: 'synced'
                 }));
+
+                // フォルダ構成を設定
+                if (cloudFolders && cloudFolders.length > 0) {
+                    this.folders = cloudFolders;
+                } else {
+                    this.ensureFoldersFromCollections();
+                }
+                
                 if (this.collections.length > 0) {
                     this.currentCollection = this.collections[0];
                 }
@@ -2102,6 +2157,9 @@ class QuizManager {
                         col.quizCount = col.quizzes.length;
                         if (typeof col.isDownloaded !== 'boolean') col.isDownloaded = true;
                         if (typeof col.isCloudPlaceholder !== 'boolean') col.isCloudPlaceholder = false;
+                        
+                        // 同期状態を初期化（localStorageから読み込まれていなければ pending に）
+                        if (!col.syncStatus) col.syncStatus = 'pending';
                     });
                 }
 

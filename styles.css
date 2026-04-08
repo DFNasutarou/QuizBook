@@ -1205,3 +1205,73 @@ h1 {
 .copy-notification {
     pointer-events: none;
 }
+
+/* ========== クラウド同期状態表示 ========== */
+
+/* option 要素：ブラウザ制限のため、絵文字テキストで状態を表示 */
+option {
+    padding: 8px;
+    line-height: 1.8;
+}
+
+/* 同期状態インジケーター用色分けクラス（参考） */
+.sync-indicator {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    margin-right: 4px;
+    vertical-align: middle;
+}
+
+.sync-indicator.synced {
+    background-color: #4CAF50; /* 緑 */
+}
+
+.sync-indicator.syncing {
+    background-color: #FFC107; /* 黄 */
+}
+
+.sync-indicator.error {
+    background-color: #f44336; /* 赤 */
+}
+
+.sync-indicator.pending {
+    background-color: #9E9E9E; /* 灰 */
+}
+
+/* Collection リストの同期状態表示補助 */
+.collection-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.collection-item .sync-badge {
+    font-size: 12px;
+    font-weight: bold;
+    padding: 2px 6px;
+    border-radius: 3px;
+    min-width: 40px;
+    text-align: center;
+}
+
+.collection-item .sync-badge.synced {
+    background-color: #E8F5E9;
+    color: #2E7D32;
+}
+
+.collection-item .sync-badge.syncing {
+    background-color: #FFF9C4;
+    color: #F57F17;
+}
+
+.collection-item .sync-badge.error {
+    background-color: #FFEBEE;
+    color: #C62828;
+}
+
+.collection-item .sync-badge.pending {
+    background-color: #F5F5F5;
+    color: #616161;
+}
