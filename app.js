@@ -522,12 +522,6 @@ class QuizManager {
         
         document.getElementById('newFolderBtn').addEventListener('click', () => this.newFolder());
         document.getElementById('downloadFolderBtn').addEventListener('click', () => this.downloadCurrentFolderFromCloud());
-        
-        // collectionDownloadBtn（新しいボタン）
-        const collectionDownloadBtn = document.getElementById('collectionDownloadBtn');
-        if (collectionDownloadBtn) {
-            collectionDownloadBtn.addEventListener('click', () => this.downloadCurrentCollectionFromCloud());
-        }
 
         // CSV関連
         const importCsvBtn = document.getElementById('importCsvBtn');
@@ -3351,7 +3345,7 @@ class QuizManager {
         const hideIds = [
             'saveBtn', 'importCsvBtn',
             'newFolderBtn', 'downloadFolderBtn', 'moveCollectionFolderBtn',
-            'newCollectionBtn', 'collectionDownloadBtn',
+            'newCollectionBtn',
             'newQuizBtn', 'deleteQuizBtn',
             'clearDataBtn'
         ];
