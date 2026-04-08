@@ -28,6 +28,9 @@ pronpts: pronpts/character_maid.md
 - エスケープ処理を正確に（CSVのカンマ、ダブルクォート）
 - 文字コードは `utf-8-sig`（BOM付きUTF-8）
 - JSON変換はユーザーが明示的に依頼した場合のみ実施
+- CSVへの書き出しは `.github/agents/batches/quiz_csv_batch_tool.bat` を使用する（手編集しない）
+- 使用する操作順: `init`（新規作成） → `add`（最大20問ずつ追加） → `export`（最終CSV出力）
+- 1回の `add` は最大20問まで（問題数が多い場合は複数回に分けて実行する）
 
 ### CSVフォーマット
 ヘッダー行：

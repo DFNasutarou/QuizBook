@@ -24,6 +24,10 @@
 - ✅ CSV形式でのインポート・エクスポート
 - ✅ 既存問題集の自動整形機能
 
+## バッチ運用
+
+- クイズ作成のCSV更新手順は [QUIZ_BATCH_WORKFLOW.md](QUIZ_BATCH_WORKFLOW.md) を参照
+
 ## ファイル構成
 
 ```

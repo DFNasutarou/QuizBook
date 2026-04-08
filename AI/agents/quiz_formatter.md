@@ -25,6 +25,9 @@ pronpts: pronpts/character_maid.md
 - **問題文や答えの内容を一切変更しない** — フォーマッターは器を整えるだけ
 - エスケープ処理を正確に（CSVのカンマ、ダブルクォート）
 - 文字コードは `utf-8-sig`（BOM付きUTF-8）
+- CSVへの書き出しは `AI/agents/batches/quiz_csv_batch_tool.bat` を使用する（手編集しない）
+- 使用する操作順: `init`（新規作成） → `add`（最大20問ずつ追加） → `export`（最終CSV出力）
+- 1回の `add` は最大20問まで（問題数が多い場合は複数回に分けて実行する）
 
 ### CSVフォーマット
 ヘッダー行：
