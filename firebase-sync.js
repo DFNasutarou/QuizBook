@@ -241,19 +241,23 @@ class FirebaseSync {
 
     async writeFolders(folders) {
         const { setDoc } = window.firebaseUtils;
+        console.log(`🔍 [DEBUG] フォルダ保存を試行: ${folders?.length || 0}個`, folders?.map(f => f.name));
         try {
             await setDoc(this.getFoldersDocRef(), {
                 schemaVersion: 1,
                 updatedAt: new Date().toISOString(),
                 folders: folders || []
             });
+            console.log(`🔍 [DEBUG] フォルダ保存成功: ${folders?.length || 0}個`);
         } catch (error) {
             if (!this.isPermissionDenied(error)) throw error;
+            console.log('🔍 [DEBUG] フォルダ保存がpermission-denied、レガシーフォールバックへ');
             const legacy = (await this.readLegacyData()) || {};
             await this.writeLegacyData({
                 ...legacy,
                 folders: folders || []
             });
+            console.log('🔍 [DEBUG] レガシー形式でフォルダ保存完了');
         }
     }
 
@@ -317,7 +321,7 @@ class FirebaseSync {
         }
 
         try {
-            console.log(`📤 フォルダ構成をクラウドに保存中... (${folders.length}個)`);
+            console.log(`📤 フォルダ構成をクラウドに保存中... (${folders.length}個)`, folders.map(f => f.name));
             await this.writeFolders(folders);
             console.log('✅ フォルダ構成をクラウドに保存しました');
         } catch (error) {

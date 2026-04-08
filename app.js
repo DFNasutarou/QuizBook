@@ -749,16 +749,22 @@ class QuizManager {
         }
 
         const oldName = folder.name;
+        console.log(`🔍 [DEBUG] フォルダ名変更開始: "${oldName}" → "${newName}"`);
+        console.log('🔍 [DEBUG] 変更前のフォルダ一覧:', this.folders.map(f => f.name));
+        
         folder.name = newName;
         
         // 同じフォルダ配下のすべての問題集のfolderプロパティを更新
+        let updatedCount = 0;
         this.collections.forEach(col => {
             if (col.folder === oldName) {
                 col.folder = newName;
+                updatedCount++;
             }
         });
 
-        console.log(`📁 フォルダ名を変更: "${oldName}" → "${newName}"`);
+        console.log(`📁 フォルダ名を変更: "${oldName}" → "${newName}" (${updatedCount}個の問題集を更新)`);
+        console.log('🔍 [DEBUG] 変更後のフォルダ一覧:', this.folders.map(f => f.name));
         this.updateUI();
         this.saveToLocalStorage();
     }
@@ -790,17 +796,26 @@ class QuizManager {
                 return;
             }
 
+            console.log(`🔍 [DEBUG] フォルダ削除開始: "${target.name}" (ID: ${target.id})`);
+            console.log('🔍 [DEBUG] 削除前のフォルダ一覧:', this.folders.map(f => `${f.name} (${f.id})`));
+
             // フォルダ内のすべての問題集をデフォルトフォルダに移動
+            let movedCount = 0;
             this.collections.forEach(col => {
                 if (col.folder === target.name) {
                     col.folder = this.defaultFolderName;
+                    movedCount++;
                 }
             });
 
+            const beforeCount = this.folders.length;
             this.folders = this.folders.filter(f => f.id !== target.id);
+            const afterCount = this.folders.length;
             this.selectedFolderId = 'folder_default';
 
-            console.log(`🗑️ フォルダを削除: "${target.name}"`);
+            console.log(`🗑️ フォルダを削除: "${target.name}" (${movedCount}個の問題集を移動)`);
+            console.log(`🔍 [DEBUG] フォルダ数: ${beforeCount} → ${afterCount}`);
+            console.log('🔍 [DEBUG] 削除後のフォルダ一覧:', this.folders.map(f => `${f.name} (${f.id})`));
             this.updateUI();
             this.saveToLocalStorage();
         } else {
@@ -2165,10 +2180,12 @@ class QuizManager {
             this.updateCollectionList();
 
             // Collection と フォルダ構成を同時に保存
+            console.log(`🔍 [DEBUG] フォルダをクラウドに保存: ${this.folders.length}個`, this.folders.map(f => f.name));
             const [syncResult] = await Promise.all([
                 window.firebaseSync.saveCollections(this.collections),
                 window.firebaseSync.saveFolders(this.folders)
             ]);
+            console.log('🔍 [DEBUG] フォルダ保存完了');
 
             const uploadedCount = syncResult?.uploadedCount || 0;
             const skippedCount = syncResult?.skippedCount || 0;
