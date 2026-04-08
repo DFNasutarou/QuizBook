@@ -76,6 +76,7 @@ python -m http.server 8000
 
 - [詳細な使用方法](docs/README.md)
 - [クラウド同期機能の使い方](#-クラウド同期の使い方)
+- [クラウド同期デバッグガイド](SYNC_DEBUG_GUIDE.md)（同期エラーが出る場合）
 - [Firestoreセキュリティルール設定](FIRESTORE_SECURITY_GUIDE.md)（クラウド同期を使う場合は必読）
 - [事実確認機能の使い方](FACT_CHECK_GUIDE.md)
 - [Chrome拡張機能のインストールガイド](chrome-extension/README.md)
@@ -88,6 +89,29 @@ python -m http.server 8000
 クラウド同期を使う前に、Firestoreのセキュリティルールを設定する必要があります。
 
 👉 **[Firestoreセキュリティルール設定ガイド](FIRESTORE_SECURITY_GUIDE.md)を参照してください**
+
+**重要**: サブコレクション（`meta/summary`、`collections/{id}`）へのアクセス権限も必要です。
+
+### 🔧 トラブルシューティング
+
+#### 同期エラーが発生する場合
+
+1. **開発者ツールのコンソールを開く**（F12キー）
+2. **診断コマンドを実行**:
+   ```javascript
+   await window.firebaseSync.diagnose()
+   ```
+3. **出力を確認**:
+   - `permission-denied`エラー → セキュリティルールを確認
+   - ドキュメントが存在しない → データ保存を実行
+   - タイムアウト → ネットワーク接続を確認
+
+#### セキュリティルールの確認
+
+[Firebase Console](https://console.firebase.google.com/) で以下を確認：
+- Firestore Database → ルール
+- サブコレクションへのアクセスが許可されているか
+- 詳細は[FIRESTORE_SECURITY_GUIDE.md](FIRESTORE_SECURITY_GUIDE.md)を参照
 
 ### 🔑 同期コードで複数デバイスを接続
 

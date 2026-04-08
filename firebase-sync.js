@@ -183,9 +183,25 @@ class FirebaseSync {
 
     async readSummary() {
         const { getDoc } = window.firebaseUtils;
-        const summarySnap = await getDoc(this.getSummaryDocRef());
-        if (!summarySnap.exists()) return null;
-        return summarySnap.data();
+        console.log(`🔍 [DEBUG] サマリー取得を試行: users/${this.userId}/meta/summary`);
+        try {
+            const summarySnap = await getDoc(this.getSummaryDocRef());
+            if (!summarySnap.exists()) {
+                console.log('🔍 [DEBUG] サマリードキュメントが存在しません');
+                return null;
+            }
+            const data = summarySnap.data();
+            console.log(`🔍 [DEBUG] サマリー取得成功:`, {
+                schemaVersion: data.schemaVersion,
+                totalCollections: data.totalCollections,
+                totalQuizzes: data.totalQuizzes,
+                collectionsCount: data.collections?.length
+            });
+            return data;
+        } catch (error) {
+            console.error(`🔍 [DEBUG] サマリー取得エラー:`, error.code, error.message);
+            throw error;
+        }
     }
 
     async readLegacyData() {
@@ -244,28 +260,33 @@ class FirebaseSync {
     async writeSummary(metas) {
         const { setDoc } = window.firebaseUtils;
         const totalQuizzes = metas.reduce((sum, meta) => sum + (meta.quizCount || 0), 0);
+        const summaryData = {
+            schemaVersion: 2,
+            updatedAt: new Date().toISOString(),
+            totalCollections: metas.length,
+            totalQuizzes: totalQuizzes,
+            collections: metas
+        };
+        
+        console.log(`🔍 [DEBUG] サマリー保存を試行: users/${this.userId}/meta/summary`, {
+            totalCollections: metas.length,
+            totalQuizzes: totalQuizzes
+        });
+        
         try {
-            await setDoc(this.getSummaryDocRef(), {
-                schemaVersion: 2,
-                updatedAt: new Date().toISOString(),
-                totalCollections: metas.length,
-                totalQuizzes: totalQuizzes,
-                collections: metas
-            });
+            await setDoc(this.getSummaryDocRef(), summaryData);
+            console.log(`🔍 [DEBUG] サマリー保存成功`);
         } catch (error) {
+            console.error(`🔍 [DEBUG] サマリー保存エラー:`, error.code, error.message);
             if (!this.isPermissionDenied(error)) throw error;
             // Legacy mode keeps summary inside users/{userId}
+            console.log(`🔍 [DEBUG] レガシーモードにフォールバック`);
             const legacy = (await this.readLegacyData()) || {};
             await this.writeLegacyData({
                 ...legacy,
-                summary: {
-                    schemaVersion: 2,
-                    updatedAt: new Date().toISOString(),
-                    totalCollections: metas.length,
-                    totalQuizzes: totalQuizzes,
-                    collections: metas
-                }
+                summary: summaryData
             });
+            console.log(`🔍 [DEBUG] レガシーモードで保存成功`);
         }
     }
 
@@ -510,11 +531,19 @@ class FirebaseSync {
                 const lastUpdateId = this.computeCollectionVersionId(collection);
                 collection.lastUpdateId = lastUpdateId;
                 collection.downloadedUpdateId = lastUpdateId;
-                await setDoc(this.getCollectionDocRef(collection.id), {
-                    ...sanitized,
-                    lastUpdateId,
-                    updatedAt: new Date().toISOString()
-                });
+                
+                console.log(`🔍 [DEBUG] 問題集保存試行: ${collection.id} (${collection.name})`);
+                try {
+                    await setDoc(this.getCollectionDocRef(collection.id), {
+                        ...sanitized,
+                        lastUpdateId,
+                        updatedAt: new Date().toISOString()
+                    });
+                    console.log(`🔍 [DEBUG] 問題集保存成功: ${collection.id}`);
+                } catch (saveError) {
+                    console.error(`🔍 [DEBUG] 問題集保存エラー: ${collection.id}`, saveError.code, saveError.message);
+                    throw saveError;
+                }
                 // クラウド保存成功後に状態を 'synced' に
                 this.setCollectionSyncStatus(collection, 'synced');
                 uploadedCount += 1;
@@ -643,6 +672,108 @@ class FirebaseSync {
         } catch (error) {
             console.error('❌ リアルタイム同期の開始に失敗:', error);
         }
+    }
+    
+    // ========================================
+    // デバッグ用ヘルパー関数
+    // ========================================
+    
+    /**
+     * Firestoreの状態を診断する（開発者ツールのコンソールから呼び出し可能）
+     * 使い方: await window.firebaseSync.diagnose()
+     */
+    async diagnose() {
+        console.log('🔍 ========== Firestore診断開始 ==========');
+        console.log(`ユーザーID: ${this.userId}`);
+        console.log(`同期コード: ${this.syncCode}`);
+        console.log(`同期有効: ${this.syncEnabled}`);
+        console.log('');
+        
+        if (!this.syncEnabled || !this.db) {
+            console.log('❌ 同期が無効またはDBが未接続です');
+            return;
+        }
+        
+        const { getDoc, getDocs, collection } = window.firebaseUtils;
+        
+        // 1. レガシーデータの確認
+        console.log('📋 1. レガシーデータ (users/{userId}) の確認...');
+        try {
+            const legacySnap = await getDoc(this.getLegacyUserDocRef());
+            if (legacySnap.exists()) {
+                const data = legacySnap.data();
+                console.log('✅ レガシードキュメントが存在します');
+                console.log('   - collections:', data.collections?.length || 0);
+                console.log('   - folders:', data.folders?.length || 0);
+                console.log('   - summary:', data.summary ? 'あり' : 'なし');
+            } else {
+                console.log('ℹ️ レガシードキュメントは存在しません');
+            }
+        } catch (error) {
+            console.error('❌ レガシーデータ取得エラー:', error.code, error.message);
+        }
+        console.log('');
+        
+        // 2. サマリーの確認
+        console.log('📋 2. サマリー (users/{userId}/meta/summary) の確認...');
+        try {
+            const summarySnap = await getDoc(this.getSummaryDocRef());
+            if (summarySnap.exists()) {
+                const data = summarySnap.data();
+                console.log('✅ サマリードキュメントが存在します');
+                console.log('   - schemaVersion:', data.schemaVersion);
+                console.log('   - totalCollections:', data.totalCollections);
+                console.log('   - totalQuizzes:', data.totalQuizzes);
+                console.log('   - collections:', data.collections?.length || 0);
+                console.log('   - updatedAt:', data.updatedAt);
+            } else {
+                console.log('ℹ️ サマリードキュメントは存在しません');
+            }
+        } catch (error) {
+            console.error('❌ サマリー取得エラー:', error.code, error.message);
+        }
+        console.log('');
+        
+        // 3. フォルダ設定の確認
+        console.log('📋 3. フォルダ設定 (users/{userId}/meta/folders) の確認...');
+        try {
+            const foldersSnap = await getDoc(this.getFoldersDocRef());
+            if (foldersSnap.exists()) {
+                const data = foldersSnap.data();
+                console.log('✅ フォルダドキュメントが存在します');
+                console.log('   - folders:', data.folders?.length || 0);
+                console.log('   - updatedAt:', data.updatedAt);
+            } else {
+                console.log('ℹ️ フォルダドキュメントは存在しません');
+            }
+        } catch (error) {
+            console.error('❌ フォルダ取得エラー:', error.code, error.message);
+        }
+        console.log('');
+        
+        // 4. 問題集コレクションの確認
+        console.log('📋 4. 問題集コレクション (users/{userId}/collections) の確認...');
+        try {
+            const collectionsRef = collection(this.db, 'users', this.userId, 'collections');
+            const snapshot = await getDocs(collectionsRef);
+            console.log(`✅ 問題集ドキュメント数: ${snapshot.size}`);
+            snapshot.forEach((doc, index) => {
+                const data = doc.data();
+                console.log(`   ${index + 1}. ${doc.id}`);
+                console.log(`      - name: ${data.name}`);
+                console.log(`      - quizzes: ${data.quizzes?.length || 0}問`);
+                console.log(`      - folder: ${data.folder || '未分類'}`);
+            });
+        } catch (error) {
+            console.error('❌ 問題集コレクション取得エラー:', error.code, error.message);
+        }
+        console.log('');
+        
+        console.log('🔍 ========== 診断完了 ==========');
+        console.log('');
+        console.log('💡 ヒント:');
+        console.log('   - permission-denied エラーが出る場合は、Firestoreセキュリティルールを確認してください');
+        console.log('   - ドキュメントが存在しない場合は、データ保存を実行してください');
     }
 }
 

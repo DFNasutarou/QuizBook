@@ -28,14 +28,26 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // ユーザーごとのデータ
+    // ユーザーごとのデータ（レガシー形式）
     match /users/{userId} {
       // 誰でも読み書き可能（シンプルな設定）
       allow read, write: if true;
+      
+      // サブコレクション: meta（メタデータ）
+      match /meta/{document=**} {
+        allow read, write: if true;
+      }
+      
+      // サブコレクション: collections（問題集データ）
+      match /collections/{collectionId} {
+        allow read, write: if true;
+      }
     }
   }
 }
 ```
+
+**重要**: `{document=**}` は、そのパス以下のすべてのドキュメントへのアクセスを許可します。
 
 ### ステップ3: 公開
 
@@ -47,6 +59,26 @@ Firebase Authenticationを使用する場合、以下のルールがより安全
 
 ```javascript
 rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 認証されたユーザーのみ、自分のデータにアクセス可能
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      
+      // サブコレクション: meta（メタデータ）
+      match /meta/{document=**} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+      
+      // サブコレクション: collections（問題集データ）
+      match /collections/{collectionId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+  }
+}
+```
 
 service cloud.firestore {
   match /databases/{database}/documents {
