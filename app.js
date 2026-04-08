@@ -2567,15 +2567,27 @@ class QuizManager {
             // 起動高速化のため、まずメタデータのみを取得
             this.showSyncOverlay('☁️ クラウドに接続中...', 'データを確認しています');
             let metas = [];
+            let cloudFolders = null;
             try {
-                metas = await this.withTimeout(
-                    window.firebaseSync.loadCollectionMetas(),
-                    12000,
-                    'クラウドメタデータ取得がタイムアウトしました'
-                );
+                // 問題集メタデータとフォルダ情報を同時に取得
+                const [metasResult, foldersResult] = await Promise.all([
+                    this.withTimeout(
+                        window.firebaseSync.loadCollectionMetas(),
+                        12000,
+                        'クラウドメタデータ取得がタイムアウトしました'
+                    ),
+                    this.withTimeout(
+                        window.firebaseSync.readFolders(),
+                        12000,
+                        'フォルダ情報取得がタイムアウトしました'
+                    )
+                ]);
+                metas = metasResult;
+                cloudFolders = foldersResult;
             } catch (metaError) {
                 console.warn('⚠️ クラウドメタデータ取得に失敗（ローカル継続）:', metaError);
                 metas = [];
+                cloudFolders = null;
             } finally {
                 this.hideSyncOverlay();
             }
@@ -2591,6 +2603,14 @@ class QuizManager {
                 if (useFirestore) {
                     this.isLoadingFromFirestore = true;
                     this.collections = this.buildCollectionsFromCloudMetas(metas);
+                    
+                    // クラウドからフォルダ情報を読み込む
+                    if (cloudFolders && Array.isArray(cloudFolders.folders)) {
+                        console.log(`📁 クラウドからフォルダ情報を読み込み: ${cloudFolders.folders.length}個`);
+                        this.folders = cloudFolders.folders;
+                        this.ensureDefaultFolder();
+                    }
+                    
                     if (this.collections.length > 0) {
                         this.currentCollection = this.collections[0];
                     }
@@ -2600,7 +2620,10 @@ class QuizManager {
                 }
             } else {
                 // クラウドにデータがない場合、現在のデータをアップロード
-                await window.firebaseSync.saveCollections(this.collections);
+                await Promise.all([
+                    window.firebaseSync.saveCollections(this.collections),
+                    window.firebaseSync.saveFolders(this.folders)
+                ]);
             }
 
             this.updateSyncUI();
@@ -2786,12 +2809,19 @@ class QuizManager {
             this.syncEnabled = true;
             this.updateSyncOverlay('📥 問題集一覧を取得中...', 'クラウドからメタデータを取得しています');
 
-            // 起動時はメタデータのみ読み込み（問題本文はオンデマンド）
-            const metas = await this.withTimeout(
-                window.firebaseSync.loadCollectionMetas(),
-                12000,
-                '問題集一覧の取得がタイムアウトしました'
-            );
+            // 起動時はメタデータとフォルダ情報を読み込み（問題本文はオンデマンド）
+            const [metas, cloudFolders] = await Promise.all([
+                this.withTimeout(
+                    window.firebaseSync.loadCollectionMetas(),
+                    12000,
+                    '問題集一覧の取得がタイムアウトしました'
+                ),
+                this.withTimeout(
+                    window.firebaseSync.readFolders(),
+                    12000,
+                    'フォルダ情報の取得がタイムアウトしました'
+                )
+            ]);
 
             if (metas && metas.length > 0) {
                 const totalQuizzes = metas.reduce((sum, meta) => sum + (meta.quizCount || 0), 0);
@@ -2799,6 +2829,14 @@ class QuizManager {
 
                 this.isLoadingFromFirestore = true;
                 this.collections = this.buildCollectionsFromCloudMetas(metas);
+                
+                // クラウドからフォルダ情報を読み込む
+                if (cloudFolders && Array.isArray(cloudFolders.folders)) {
+                    console.log(`📁 クラウドからフォルダ情報を読み込み: ${cloudFolders.folders.length}個`);
+                    this.folders = cloudFolders.folders;
+                    this.ensureDefaultFolder();
+                }
+                
                 if (this.collections.length > 0) {
                     this.currentCollection = this.collections[0];
                 }
