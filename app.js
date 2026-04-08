@@ -2116,7 +2116,7 @@ class QuizManager {
             this.collections.forEach(col => {
                 if (col) window.firebaseSync.setCollectionSyncStatus(col, 'syncing');
             });
-            this.updateCollectionsList();
+            this.updateCollectionList();
 
             // Collection と フォルダ構成を同時に保存
             await Promise.all([
@@ -2128,7 +2128,7 @@ class QuizManager {
             this.collections.forEach(col => {
                 if (col) window.firebaseSync.setCollectionSyncStatus(col, 'synced');
             });
-            this.updateCollectionsList();
+            this.updateCollectionList();
 
             console.log('✅ クラウドにアップロード成功');
             this.setLastSync('成功', `${this.collections.length}問題集・${totalQuizzes}問`);
@@ -2138,7 +2138,7 @@ class QuizManager {
             this.collections.forEach(col => {
                 if (col) window.firebaseSync.setCollectionSyncStatus(col, 'error');
             });
-            this.updateCollectionsList();
+            this.updateCollectionList();
             this.setLastSync('失敗', err.message || '保存エラー');
             this.showNotification(`<strong>⚠️ クラウド保存に失敗</strong><br><small>${err.message}</small>`, 'error');
         }
@@ -2566,8 +2566,19 @@ class QuizManager {
 
             // 起動高速化のため、まずメタデータのみを取得
             this.showSyncOverlay('☁️ クラウドに接続中...', 'データを確認しています');
-            const metas = await window.firebaseSync.loadCollectionMetas();
-            this.hideSyncOverlay();
+            let metas = [];
+            try {
+                metas = await this.withTimeout(
+                    window.firebaseSync.loadCollectionMetas(),
+                    12000,
+                    'クラウドメタデータ取得がタイムアウトしました'
+                );
+            } catch (metaError) {
+                console.warn('⚠️ クラウドメタデータ取得に失敗（ローカル継続）:', metaError);
+                metas = [];
+            } finally {
+                this.hideSyncOverlay();
+            }
             if (metas && metas.length > 0) {
                 const useFirestore = confirm(
                     '☁️ クラウドにデータが見つかりました\n\n' +
@@ -2746,43 +2757,66 @@ class QuizManager {
         if (overlay) overlay.style.display = 'none';
     }
 
+    async withTimeout(promise, timeoutMs, timeoutMessage) {
+        let timerId;
+        const timeoutPromise = new Promise((_, reject) => {
+            timerId = setTimeout(() => {
+                reject(new Error(timeoutMessage || '処理がタイムアウトしました'));
+            }, timeoutMs);
+        });
+
+        try {
+            return await Promise.race([promise, timeoutPromise]);
+        } finally {
+            clearTimeout(timerId);
+        }
+    }
+
     async enableSyncSilently() {
         if (!window.firebaseSync) return;
 
         this.showSyncOverlay('☁️ クラウドに接続中...', 'Firebase を初期化しています');
 
-        const success = await window.firebaseSync.enableSync();
-        if (!success) {
-            this.hideSyncOverlay();
-            return;
-        }
-
-        this.syncEnabled = true;
-
-        this.updateSyncOverlay('📥 問題集一覧を取得中...', 'クラウドからメタデータを取得しています');
-
-        // 起動時はメタデータのみ読み込み（問題本文はオンデマンド）
-        const metas = await window.firebaseSync.loadCollectionMetas();
-        if (metas && metas.length > 0) {
-            const totalQuizzes = metas.reduce((sum, meta) => sum + (meta.quizCount || 0), 0);
-            this.updateSyncOverlay('✅ 問題集一覧を反映中...', `${metas.length} 問題集・${totalQuizzes} 問`);
-
-            this.isLoadingFromFirestore = true;
-            this.collections = this.buildCollectionsFromCloudMetas(metas);
-            if (this.collections.length > 0) {
-                this.currentCollection = this.collections[0];
+        try {
+            const success = await window.firebaseSync.enableSync();
+            if (!success) {
+                return;
             }
-            this.updateUI();
-            this.saveToLocalStorage();
-            this.isLoadingFromFirestore = false;
-            console.log('✅ 起動時にクラウドの問題集一覧を読み込みました（本文はオンデマンド）');
+
+            this.syncEnabled = true;
+            this.updateSyncOverlay('📥 問題集一覧を取得中...', 'クラウドからメタデータを取得しています');
+
+            // 起動時はメタデータのみ読み込み（問題本文はオンデマンド）
+            const metas = await this.withTimeout(
+                window.firebaseSync.loadCollectionMetas(),
+                12000,
+                '問題集一覧の取得がタイムアウトしました'
+            );
+
+            if (metas && metas.length > 0) {
+                const totalQuizzes = metas.reduce((sum, meta) => sum + (meta.quizCount || 0), 0);
+                this.updateSyncOverlay('✅ 問題集一覧を反映中...', `${metas.length} 問題集・${totalQuizzes} 問`);
+
+                this.isLoadingFromFirestore = true;
+                this.collections = this.buildCollectionsFromCloudMetas(metas);
+                if (this.collections.length > 0) {
+                    this.currentCollection = this.collections[0];
+                }
+                this.updateUI();
+                this.saveToLocalStorage();
+                this.isLoadingFromFirestore = false;
+                console.log('✅ 起動時にクラウドの問題集一覧を読み込みました（本文はオンデマンド）');
+            }
+
+            this.updateSyncUI();
+            await new Promise(r => setTimeout(r, 300));
+        } catch (error) {
+            console.warn('⚠️ 同期起動時のメタデータ取得に失敗（ローカル継続）:', error);
+            this.updateSyncUI();
+            this.showNotification('<strong>⚠️ クラウド一覧の取得に失敗</strong><br><small>ローカルデータで継続します</small>', 'warning');
+        } finally {
+            this.hideSyncOverlay();
         }
-
-        this.updateSyncUI();
-
-        // 少し余韻を持たせて閉じる
-        await new Promise(r => setTimeout(r, 500));
-        this.hideSyncOverlay();
     }
 
     updateSyncUI() {
