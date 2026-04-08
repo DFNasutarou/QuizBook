@@ -2155,7 +2155,7 @@ class QuizManager {
         if (!this.syncEnabled || !window.firebaseSync) return;
 
         const totalQuizzes = this.collections.reduce((sum, c) => sum + this.getCollectionQuizCount(c), 0);
-        console.log(`📤 クラウドにアップロード中... (${this.collections.length}問題集, ${totalQuizzes}問)`);
+        console.log(`📤 クラウド差分同期を実行中... (${this.collections.length}問題集, ${totalQuizzes}問)`);
         
         try {
             // 各 collection を syncing 状態に設定
@@ -2165,10 +2165,15 @@ class QuizManager {
             this.updateCollectionList();
 
             // Collection と フォルダ構成を同時に保存
-            await Promise.all([
+            const [syncResult] = await Promise.all([
                 window.firebaseSync.saveCollections(this.collections),
                 window.firebaseSync.saveFolders(this.folders)
             ]);
+
+            const uploadedCount = syncResult?.uploadedCount || 0;
+            const skippedCount = syncResult?.skippedCount || 0;
+            const deletedCount = syncResult?.deletedCount || 0;
+            const fallback = Boolean(syncResult?.fallback);
 
             // 全て synced 状態に
             this.collections.forEach(col => {
@@ -2176,9 +2181,15 @@ class QuizManager {
             });
             this.updateCollectionList();
 
-            console.log('✅ クラウドにアップロード成功');
-            this.setLastSync('成功', `${this.collections.length}問題集・${totalQuizzes}問`);
-            this.showNotification(`<strong>☁️ クラウドに保存しました</strong><br><small>${this.collections.length}問題集・${totalQuizzes}問を同期</small>`, 'success');
+            if (fallback) {
+                console.log('✅ クラウドにアップロード成功（旧形式フォールバック）');
+                this.setLastSync('成功', `旧形式保存: ${this.collections.length}問題集`);
+                this.showNotification(`<strong>☁️ クラウドに保存しました</strong><br><small>旧形式で全体保存（${this.collections.length}問題集）</small>`, 'success');
+            } else {
+                console.log(`✅ クラウド差分同期成功 (更新:${uploadedCount}, スキップ:${skippedCount}, 削除:${deletedCount})`);
+                this.setLastSync('成功', `更新:${uploadedCount} / スキップ:${skippedCount} / 削除:${deletedCount}`);
+                this.showNotification(`<strong>☁️ クラウド差分同期しました</strong><br><small>更新:${uploadedCount}件 / スキップ:${skippedCount}件 / 削除:${deletedCount}件</small>`, 'success');
+            }
         } catch (err) {
             console.error('❌ クラウドアップロードエラー:', err);
             this.collections.forEach(col => {

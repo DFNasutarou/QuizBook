@@ -325,45 +325,77 @@ class FirebaseSync {
         return legacyData.collections.map(c => this.buildCollectionMeta(c));
     }
 
+    // readSummary に内部タイムアウトを掛けるラッパー
+    async readSummaryWithTimeout(timeoutMs = 8000) {
+        let timerId;
+        const timeoutPromise = new Promise((_, reject) => {
+            timerId = setTimeout(
+                () => reject(new Error('firestore_summary_timeout')),
+                timeoutMs
+            );
+        });
+        try {
+            return await Promise.race([this.readSummary(), timeoutPromise]);
+        } finally {
+            clearTimeout(timerId);
+        }
+    }
+
     async loadCollectionMetas() {
         if (!this.syncEnabled || !this.db) {
             console.log('ℹ️ Firestoreメタデータ読み込みはスキップされました（同期が無効またはDBが未接続）');
             return [];
         }
 
+        // --- サマリー doc を 8 秒タイムアウト付きで試みる ---
+        let summary = null;
+        let summaryError = null;
         try {
-            const summary = await this.readSummary();
-            if (summary && Array.isArray(summary.collections)) {
-                console.log(`✅ Firestoreメタデータ読み込み成功 (${summary.collections.length}問題集)`);
-                return summary.collections;
-            }
+            summary = await this.readSummaryWithTimeout(8000);
+        } catch (err) {
+            summaryError = err;
+            const reason = err.message === 'firestore_summary_timeout' ? 'タイムアウト'
+                : this.isPermissionDenied(err) ? 'パーミッション拒否'
+                : err.message || 'ネットワークエラー';
+            console.warn(`⚠️ サマリー取得失敗 (${reason})、レガシーフォールバックへ`);
+        }
 
-            const migratedMetas = await this.migrateLegacyIfNeeded();
-            if (migratedMetas) {
-                console.log(`✅ 旧形式から移行完了 (${migratedMetas.length}問題集)`);
-                return migratedMetas;
-            }
+        // サマリー成功時
+        if (summary && Array.isArray(summary.collections)) {
+            console.log(`✅ Firestoreメタデータ読み込み成功 (${summary.collections.length}問題集)`);
+            return summary.collections;
+        }
 
+        // サマリーが空（初回など）かつエラーなし → レガシー移行を試みる
+        if (!summaryError) {
+            try {
+                const migratedMetas = await this.migrateLegacyIfNeeded();
+                if (migratedMetas) {
+                    console.log(`✅ 旧形式から移行完了 (${migratedMetas.length}問題集)`);
+                    return migratedMetas;
+                }
+            } catch (migrateErr) {
+                console.warn('⚠️ 旧形式移行に失敗:', migrateErr.message);
+            }
             console.log('ℹ️ Firestoreにメタデータが見つかりませんでした（初回使用）');
             return [];
-        } catch (error) {
-            if (this.isPermissionDenied(error)) {
-                try {
-                    const legacy = await this.readLegacyData();
-                    if (legacy && Array.isArray(legacy.collections)) {
-                        const metas = legacy.collections
-                            .filter(c => c && c.id)
-                            .map(c => this.buildCollectionMeta(c));
-                        console.log(`✅ 旧形式データからメタデータ読み込み (${metas.length}問題集)`);
-                        return metas;
-                    }
-                } catch (legacyError) {
-                    console.error('❌ 旧形式メタデータ読み込みエラー:', legacyError);
-                }
-            }
-            console.error('❌ Firestoreメタデータ読み込みエラー:', error);
-            return [];
         }
+
+        // タイムアウト / permission denied / その他エラー → レガシー直読み
+        try {
+            const legacy = await this.readLegacyData();
+            if (legacy && Array.isArray(legacy.collections)) {
+                const metas = legacy.collections
+                    .filter(c => c && c.id)
+                    .map(c => this.buildCollectionMeta(c));
+                console.log(`✅ 旧形式データからメタデータ読み込み (${metas.length}問題集)`);
+                return metas;
+            }
+        } catch (legacyError) {
+            console.error('❌ 旧形式メタデータ読み込みエラー:', legacyError);
+        }
+        console.error('❌ Firestoreメタデータ読み込みエラー（全fallback失敗）:', summaryError);
+        return [];
     }
 
     async loadCollectionById(collectionId) {
@@ -425,19 +457,27 @@ class FirebaseSync {
     async saveCollections(collections) {
         if (!this.syncEnabled || !this.db) {
             console.log('ℹ️ Firestore同期はスキップされました（同期が無効またはDBが未接続）');
-            return;
+            return {
+                uploadedCount: 0,
+                skippedCount: 0,
+                deletedCount: 0
+            };
         }
 
         try {
             const { setDoc, deleteDoc } = window.firebaseUtils;
             const previousMetas = await this.loadCollectionMetas();
             const previousIdSet = new Set(previousMetas.map(meta => meta.id));
+            const previousMetaById = new Map(previousMetas.map(meta => [meta.id, meta]));
 
             const totalQuizzes = collections.reduce((sum, c) => sum + (c.quizzes?.length || 0), 0);
             console.log(`📤 Firestoreに保存中... (${collections.length}問題集, ${totalQuizzes}問)`);
 
             const nextMetas = [];
             const nextIdSet = new Set();
+            let uploadedCount = 0;
+            let skippedCount = 0;
+            let deletedCount = 0;
 
             for (const collection of collections) {
                 if (!collection || !collection.id) continue;
@@ -457,6 +497,15 @@ class FirebaseSync {
                     continue;
                 }
 
+                const previousMeta = previousMetaById.get(collection.id);
+                if (previousMeta && previousMeta.lastUpdateId && previousMeta.lastUpdateId === meta.lastUpdateId) {
+                    collection.lastUpdateId = meta.lastUpdateId;
+                    collection.downloadedUpdateId = meta.lastUpdateId;
+                    this.setCollectionSyncStatus(collection, 'synced');
+                    skippedCount += 1;
+                    continue;
+                }
+
                 const sanitized = this.sanitizeCollectionForCloud(collection);
                 const lastUpdateId = this.computeCollectionVersionId(collection);
                 collection.lastUpdateId = lastUpdateId;
@@ -468,17 +517,24 @@ class FirebaseSync {
                 });
                 // クラウド保存成功後に状態を 'synced' に
                 this.setCollectionSyncStatus(collection, 'synced');
+                uploadedCount += 1;
             }
 
             for (const previousId of previousIdSet) {
                 if (!nextIdSet.has(previousId)) {
                     await deleteDoc(this.getCollectionDocRef(previousId));
                     console.log(`🗑️ クラウドから問題集を削除: ${previousId}`);
+                    deletedCount += 1;
                 }
             }
 
             await this.writeSummary(nextMetas);
-            console.log('✅ Firestoreへの同期が完了しました');
+            console.log(`✅ Firestoreへの同期が完了しました (更新:${uploadedCount}, スキップ:${skippedCount}, 削除:${deletedCount})`);
+            return {
+                uploadedCount,
+                skippedCount,
+                deletedCount
+            };
         } catch (error) {
             if (this.isPermissionDenied(error)) {
                 const legacyCollections = collections
@@ -491,7 +547,12 @@ class FirebaseSync {
                 });
                 collections.forEach(c => this.setCollectionSyncStatus(c, 'synced'));
                 console.log('✅ 旧形式（users/{userId}）へフォールバック保存しました');
-                return;
+                return {
+                    uploadedCount: collections.length,
+                    skippedCount: 0,
+                    deletedCount: 0,
+                    fallback: true
+                };
             }
             console.error('❌ Firestore同期エラー:', error);
             throw error;
