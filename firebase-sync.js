@@ -123,6 +123,16 @@ class FirebaseSync {
         return doc(this.db, 'users', this.userId, 'collections', collectionId);
     }
 
+    getLegacyUserDocRef() {
+        const { doc } = window.firebaseUtils;
+        return doc(this.db, 'users', this.userId);
+    }
+
+    isPermissionDenied(error) {
+        const code = error && error.code ? String(error.code) : '';
+        return code.includes('permission-denied') || code.includes('insufficient permissions');
+    }
+
     sanitizeCollectionForCloud(collection) {
         const sanitized = { ...collection };
         delete sanitized.isCloudPlaceholder;
@@ -154,32 +164,85 @@ class FirebaseSync {
         return summarySnap.data();
     }
 
+    async readLegacyData() {
+        const { getDoc } = window.firebaseUtils;
+        const legacySnap = await getDoc(this.getLegacyUserDocRef());
+        if (!legacySnap.exists()) return null;
+        return legacySnap.data() || null;
+    }
+
+    async writeLegacyData(data) {
+        const { setDoc } = window.firebaseUtils;
+        await setDoc(this.getLegacyUserDocRef(), {
+            ...data,
+            updated_at: new Date().toISOString()
+        });
+    }
+
     async readFolders() {
         const { getDoc } = window.firebaseUtils;
-        const foldersSnap = await getDoc(this.getFoldersDocRef());
-        if (!foldersSnap.exists()) return null;
-        return foldersSnap.data();
+        try {
+            const foldersSnap = await getDoc(this.getFoldersDocRef());
+            if (!foldersSnap.exists()) return null;
+            return foldersSnap.data();
+        } catch (error) {
+            if (!this.isPermissionDenied(error)) throw error;
+            const legacy = await this.readLegacyData();
+            if (legacy && Array.isArray(legacy.folders)) {
+                return {
+                    schemaVersion: 1,
+                    updatedAt: legacy.updated_at || null,
+                    folders: legacy.folders
+                };
+            }
+            return null;
+        }
     }
 
     async writeFolders(folders) {
         const { setDoc } = window.firebaseUtils;
-        await setDoc(this.getFoldersDocRef(), {
-            schemaVersion: 1,
-            updatedAt: new Date().toISOString(),
-            folders: folders || []
-        });
+        try {
+            await setDoc(this.getFoldersDocRef(), {
+                schemaVersion: 1,
+                updatedAt: new Date().toISOString(),
+                folders: folders || []
+            });
+        } catch (error) {
+            if (!this.isPermissionDenied(error)) throw error;
+            const legacy = (await this.readLegacyData()) || {};
+            await this.writeLegacyData({
+                ...legacy,
+                folders: folders || []
+            });
+        }
     }
 
     async writeSummary(metas) {
         const { setDoc } = window.firebaseUtils;
         const totalQuizzes = metas.reduce((sum, meta) => sum + (meta.quizCount || 0), 0);
-        await setDoc(this.getSummaryDocRef(), {
-            schemaVersion: 2,
-            updatedAt: new Date().toISOString(),
-            totalCollections: metas.length,
-            totalQuizzes: totalQuizzes,
-            collections: metas
-        });
+        try {
+            await setDoc(this.getSummaryDocRef(), {
+                schemaVersion: 2,
+                updatedAt: new Date().toISOString(),
+                totalCollections: metas.length,
+                totalQuizzes: totalQuizzes,
+                collections: metas
+            });
+        } catch (error) {
+            if (!this.isPermissionDenied(error)) throw error;
+            // Legacy mode keeps summary inside users/{userId}
+            const legacy = (await this.readLegacyData()) || {};
+            await this.writeLegacyData({
+                ...legacy,
+                summary: {
+                    schemaVersion: 2,
+                    updatedAt: new Date().toISOString(),
+                    totalCollections: metas.length,
+                    totalQuizzes: totalQuizzes,
+                    collections: metas
+                }
+            });
+        }
     }
 
     async loadFolders() {
@@ -260,6 +323,20 @@ class FirebaseSync {
             console.log('ℹ️ Firestoreにメタデータが見つかりませんでした（初回使用）');
             return [];
         } catch (error) {
+            if (this.isPermissionDenied(error)) {
+                try {
+                    const legacy = await this.readLegacyData();
+                    if (legacy && Array.isArray(legacy.collections)) {
+                        const metas = legacy.collections
+                            .filter(c => c && c.id)
+                            .map(c => this.buildCollectionMeta(c));
+                        console.log(`✅ 旧形式データからメタデータ読み込み (${metas.length}問題集)`);
+                        return metas;
+                    }
+                } catch (legacyError) {
+                    console.error('❌ 旧形式メタデータ読み込みエラー:', legacyError);
+                }
+            }
             console.error('❌ Firestoreメタデータ読み込みエラー:', error);
             return [];
         }
@@ -293,6 +370,27 @@ class FirebaseSync {
             console.log(`✅ 問題集を読み込みました: ${collection.name || collectionId} (${quizzes.length}問)`);
             return collection;
         } catch (error) {
+            if (this.isPermissionDenied(error)) {
+                try {
+                    const legacy = await this.readLegacyData();
+                    const legacyCollection = legacy && Array.isArray(legacy.collections)
+                        ? legacy.collections.find(c => c && c.id === collectionId)
+                        : null;
+                    if (legacyCollection) {
+                        const quizzes = Array.isArray(legacyCollection.quizzes) ? legacyCollection.quizzes : [];
+                        return {
+                            ...legacyCollection,
+                            id: legacyCollection.id || collectionId,
+                            quizzes,
+                            isCloudPlaceholder: false,
+                            isDownloaded: true,
+                            quizCount: quizzes.length
+                        };
+                    }
+                } catch (legacyError) {
+                    console.error(`❌ 旧形式問題集の読み込みエラー (${collectionId}):`, legacyError);
+                }
+            }
             console.error(`❌ 問題集の読み込みエラー (${collectionId}):`, error);
             return null;
         }
@@ -352,6 +450,19 @@ class FirebaseSync {
             await this.writeSummary(nextMetas);
             console.log('✅ Firestoreへの同期が完了しました');
         } catch (error) {
+            if (this.isPermissionDenied(error)) {
+                const legacyCollections = collections
+                    .filter(c => c && c.id)
+                    .map(c => this.sanitizeCollectionForCloud(c));
+                const legacy = (await this.readLegacyData()) || {};
+                await this.writeLegacyData({
+                    ...legacy,
+                    collections: legacyCollections
+                });
+                collections.forEach(c => this.setCollectionSyncStatus(c, 'synced'));
+                console.log('✅ 旧形式（users/{userId}）へフォールバック保存しました');
+                return;
+            }
             console.error('❌ Firestore同期エラー:', error);
             throw error;
         }
