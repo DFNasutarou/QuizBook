@@ -138,8 +138,26 @@ class FirebaseSync {
         delete sanitized.isCloudPlaceholder;
         delete sanitized.isDownloaded;
         delete sanitized.quizCount;
+        delete sanitized.syncStatus;
+        delete sanitized.syncUpdatedAt;
         sanitized.quizzes = Array.isArray(collection.quizzes) ? collection.quizzes : [];
         return sanitized;
+    }
+
+    computeCollectionVersionId(collection) {
+        const payload = {
+            id: collection?.id || '',
+            name: collection?.name || '',
+            folder: collection?.folder || '未分類',
+            quizzes: Array.isArray(collection?.quizzes) ? collection.quizzes : []
+        };
+        const json = JSON.stringify(payload);
+        let hash = 0;
+        for (let i = 0; i < json.length; i++) {
+            hash = ((hash << 5) - hash) + json.charCodeAt(i);
+            hash |= 0;
+        }
+        return `v1_${Math.abs(hash).toString(36)}_${json.length.toString(36)}`;
     }
 
     buildCollectionMeta(collection) {
@@ -147,11 +165,17 @@ class FirebaseSync {
             ? collection.quizzes.length
             : (collection.quizCount || 0);
 
+        const isPlaceholder = Boolean(collection.isCloudPlaceholder && !collection.isDownloaded);
+        const lastUpdateId = isPlaceholder
+            ? (collection.lastUpdateId || collection.downloadedUpdateId || null)
+            : this.computeCollectionVersionId(collection);
+
         return {
             id: collection.id,
             name: collection.name || '無題の問題集',
             quizCount: quizCount,
             folder: collection.folder || '未分類',
+            lastUpdateId,
             updatedAt: new Date().toISOString(),
             created_at: collection.created_at || null
         };
@@ -364,7 +388,8 @@ class FirebaseSync {
                 quizzes,
                 isCloudPlaceholder: false,
                 isDownloaded: true,
-                quizCount: quizzes.length
+                quizCount: quizzes.length,
+                downloadedUpdateId: data.lastUpdateId || null
             };
 
             console.log(`✅ 問題集を読み込みました: ${collection.name || collectionId} (${quizzes.length}問)`);
@@ -384,7 +409,8 @@ class FirebaseSync {
                             quizzes,
                             isCloudPlaceholder: false,
                             isDownloaded: true,
-                            quizCount: quizzes.length
+                            quizCount: quizzes.length,
+                            downloadedUpdateId: legacyCollection.lastUpdateId || null
                         };
                     }
                 } catch (legacyError) {
@@ -432,8 +458,12 @@ class FirebaseSync {
                 }
 
                 const sanitized = this.sanitizeCollectionForCloud(collection);
+                const lastUpdateId = this.computeCollectionVersionId(collection);
+                collection.lastUpdateId = lastUpdateId;
+                collection.downloadedUpdateId = lastUpdateId;
                 await setDoc(this.getCollectionDocRef(collection.id), {
                     ...sanitized,
+                    lastUpdateId,
                     updatedAt: new Date().toISOString()
                 });
                 // クラウド保存成功後に状態を 'synced' に
