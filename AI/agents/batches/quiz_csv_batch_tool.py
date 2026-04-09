@@ -115,7 +115,7 @@ def parse_batch_rows(batch_path: Path) -> List[Dict[str, str]]:
                 "答え": row.get("答え", ""),
                 "メモ": row.get("メモ", ""),
                 "ジャンル": row.get("ジャンル", "ノンジャンル") or "ノンジャンル",
-                "難易度": row.get("難易度", "中") or "中",
+                "難易度": row.get("難易度", "5") or "5",
                 "タグ": row.get("タグ", ""),
             }
         )
@@ -194,7 +194,7 @@ def cmd_export(args: argparse.Namespace) -> int:
                 "答え": row.get("答え", ""),
                 "メモ": row.get("メモ", ""),
                 "ジャンル": row.get("ジャンル", "ノンジャンル") or "ノンジャンル",
-                "難易度": row.get("難易度", "中") or "中",
+                "難易度": row.get("難易度", "5") or "5",
                 "タグ": row.get("タグ", ""),
             }
         )

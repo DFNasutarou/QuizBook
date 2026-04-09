@@ -1454,7 +1454,7 @@ class QuizManager {
 
             const difficultyTag = document.createElement('span');
             difficultyTag.className = 'tag';
-            difficultyTag.textContent = ['易', '中', '難'][quiz.difficulty - 1];
+            difficultyTag.textContent = quiz.difficulty;
             tagsDiv.appendChild(difficultyTag);
 
             if (quiz.tags) {
@@ -1598,7 +1598,7 @@ class QuizManager {
 
             const difficultyTag = document.createElement('span');
             difficultyTag.className = 'tag';
-            difficultyTag.textContent = ['易', '中', '難'][quiz.difficulty - 1];
+            difficultyTag.textContent = quiz.difficulty;
             tagsDiv.appendChild(difficultyTag);
 
             const controlsDiv = document.createElement('div');
@@ -1848,7 +1848,7 @@ class QuizManager {
 
         // 難易度タグ
         const difficultyTag = document.getElementById('quizDifficultyTag');
-        difficultyTag.textContent = ['易', '中', '難'][quiz.difficulty - 1];
+        difficultyTag.textContent = quiz.difficulty;
 
         // 問題文表示
         document.getElementById('questionDisplay').innerHTML = this.formatText(quiz.question);
@@ -2504,9 +2504,9 @@ class QuizManager {
                         if (typeof quiz.difficulty === 'number') {
                             quiz.difficulty = Math.round(quiz.difficulty);
                             if (quiz.difficulty < 1) quiz.difficulty = 1;
-                            if (quiz.difficulty > 3) quiz.difficulty = 3;
+                            if (quiz.difficulty > 10) quiz.difficulty = 10;
                         } else {
-                            quiz.difficulty = 2; // デフォルト
+                            quiz.difficulty = 5; // デフォルト
                         }
 
                         // その他のフィールドの初期化
@@ -2988,7 +2988,7 @@ class QuizManager {
                             answer: parts[1] || '',
                             memo: parts[2] || '',
                             genre: parts[3] || 'ノンジャンル',
-                            difficulty: this.parseDifficulty(parts[4]) || 2,
+                            difficulty: this.parseDifficulty(parts[4]) || 5,
                             tags: parts[5] ? parts[5].split(',').map(t => t.trim()).filter(t => t) : [],
                             created_at: new Date().toISOString()
                         };
@@ -3049,7 +3049,7 @@ class QuizManager {
         let csv = '問題文,答え,メモ,ジャンル,難易度,タグ\n';
 
         this.currentCollection.quizzes.forEach(quiz => {
-            const difficulty = ['易', '中', '難'][quiz.difficulty - 1];
+            const difficulty = String(quiz.difficulty);
             const tags = quiz.tags ? quiz.tags.join(', ') : '';
 
             csv += `"${this.escapeCsv(quiz.question)}","${this.escapeCsv(quiz.answer)}","${this.escapeCsv(quiz.memo)}","${quiz.genre}","${difficulty}","${tags}"\n`;
@@ -3141,12 +3141,15 @@ class QuizManager {
     }
 
     parseDifficulty(text) {
-        if (!text) return 2;
+        if (!text) return 5;
         text = text.trim();
-        if (text === '易' || text === '1') return 1;
-        if (text === '中' || text === '2') return 2;
-        if (text === '難' || text === '3') return 3;
-        return 2;
+        // 旧テキスト値との後方互換
+        if (text === '易') return 2;
+        if (text === '中') return 5;
+        if (text === '難') return 7;
+        const n = parseInt(text, 10);
+        if (!isNaN(n) && n >= 1 && n <= 10) return n;
+        return 5;
     }
 
     escapeCsv(text) {
