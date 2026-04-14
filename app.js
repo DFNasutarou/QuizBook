@@ -1257,7 +1257,7 @@ class QuizManager {
         document.getElementById('answerInput').value = '';
         document.getElementById('memoInput').value = '';
         document.getElementById('genreSelect').value = 'ノンジャンル';
-        document.getElementById('difficultySelect').value = '2';
+        document.getElementById('difficultySelect').value = '3';
         document.getElementById('tagsInput').value = '';
     }
 
