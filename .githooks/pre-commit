@@ -1,0 +1,16 @@
+#!/bin/sh
+
+# Validate staged CSV files for QuizBook.
+
+if command -v python3 >/dev/null 2>&1; then
+  python3 scripts/validate_staged_csv.py
+  exit $?
+fi
+
+if command -v python >/dev/null 2>&1; then
+  python scripts/validate_staged_csv.py
+  exit $?
+fi
+
+echo "[pre-commit] python が見つからないため CSV 検証をスキップしました"
+exit 0

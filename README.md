@@ -199,6 +199,24 @@ QuizBook/
 
 ## 🛠️ 開発
 
+### Git Hooksの有効化（推奨）
+
+クローン直後にローカル検証を有効化できます。
+
+```bash
+git config core.hooksPath .githooks
+```
+
+PowerShellでは次でも設定できます。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/setup-git-hooks.ps1
+```
+
+現在のpre-commitフックでは、`data/csv/` 配下のステージ済みCSVに対して以下を検証します。
+- ヘッダーが `問題文,答え,メモ,ジャンル,難易度,タグ` と一致すること
+- 難易度が `1`-`10` または `易/中/難` のいずれかであること
+
 ### データ整形（既存CSVファイルがある場合）
 
 ```bash
