@@ -154,7 +154,9 @@ A: すでに同期ONのデバイスで、同期ボタンを右クリック（ま
 A: Google Firebase（Googleのクラウドサービス）に保存されます。
 
 **Q: 他の人に見られませんか？**  
-A: 同期コード（6桁）を知っている人だけがアクセスできます。コードを他人に教えなければ安全です。より詳しくは[Firestoreセキュリティガイド](FIRESTORE_SECURITY_GUIDE.md)を参照してください。
+A: **[firestore.rules](firestore.rules) の設定が前提です。** 設定済みであれば、同期コード（6桁）を知っている人だけがアクセスできます。同期コードは共有パスワードと同じものだと考えて、画面共有や配信で映さないように注意してください。
+
+⚠️ 以前このガイドが案内していた `allow read, write: if true` のままだと、**誰でも全ユーザーのデータを一覧・取得できます**。必ず[Firestoreセキュリティガイド](FIRESTORE_SECURITY_GUIDE.md)の手順で更新してください。
 
 **Q: 同期コードを変更できますか？**  
 A: はい。同期をOFFにしてから、再度ONにする際に新しいコードを生成または入力できます。
@@ -175,6 +177,8 @@ A: はい、Firebaseの無料枠（1GB、50,000回/日の読み取り）で十�
 QuizBook/
 ├── index.html                          # メインHTML
 ├── app.js                              # JavaScriptアプリケーション
+├── firebase-sync.js                    # クラウド同期
+├── firestore.rules                     # Firestoreセキュリティルール（要設定）
 ├── styles.css                          # スタイルシート
 ├── quiz_collections_complete.json      # 統合問題集データ
 │

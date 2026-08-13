@@ -2,158 +2,120 @@
 
 クラウド同期機能を安全に使用するためのFirestoreセキュリティルール設定手順です。
 
-## 🔐 セキュリティルールとは
+## ⚠️ 以前のルールを使っている場合は今すぐ更新してください
 
-Firestoreのセキュリティルールは、誰がどのデータにアクセスできるかを制御します。デフォルトでは**テストモード**になっており、30日間は誰でもアクセス可能です。
+このガイドは以前、次のルールを案内していました。
 
-## ⚠️ 重要：本番環境での設定が必須
+```javascript
+match /users/{userId} {
+  allow read, write: if true;   // ← 危険
+}
+```
 
-テストモードのまま使用すると、30日後にアクセスできなくなります。また、誰でもデータを読み書きできてしまいます。
+Firestore の `read` は「1件取得（get）」だけでなく **「コレクション列挙（list）」も含みます**。
+そのため上記の設定では、**誰でも `users` コレクションを丸ごと列挙して、全ユーザーの同期コードと問題集データを取得・改ざん・削除できる**状態でした。6桁の同期コードは障壁として機能していません（総当りすら不要で、一覧が取れてしまうため）。
+
+以前のルールを公開したままの場合は、下記の手順で更新してください。
+
+---
 
 ## 📋 設定手順
 
-### ステップ1: Firebase Console を開く
+### ステップ1: 匿名認証を有効化する（先に実施）
 
-1. https://console.firebase.google.com/ にアクセス
-2. QuizBook プロジェクトを選択
-3. 左メニュー「構築」→「Firestore Database」をクリック
-4. 上部タブの「ルール」をクリック
+新しいルールは `request.auth != null` を要求します。**ルールより先に**認証を有効化してください。順序を逆にすると、既存の利用者が `permission-denied` になります。
 
-### ステップ2: セキュリティルールを設定
+1. [Firebase Console](https://console.firebase.google.com/) で QuizBook プロジェクトを開く
+2. 左メニュー「構築」→「Authentication」→「始める」
+3. 「Sign-in method」タブ →「匿名」を選択
+4. 「有効にする」を ON にして「保存」
 
-以下のルールをコピーして貼り付けます：
+アプリ側（`index.html`）は既に匿名サインインを行うようになっています。有効化されていない場合は警告をコンソールに出して認証なしで続行するため、この手順を飛ばしても旧ルールのままなら動作はします（ただし危険な状態のままです）。
+
+### ステップ2: セキュリティルールを公開する
+
+1. 左メニュー「構築」→「Firestore Database」→ 上部タブ「ルール」
+2. リポジトリの [`firestore.rules`](firestore.rules) の内容を貼り付け
+3. 右上の「公開」をクリック
+
+要点は次の2つです。
 
 ```javascript
-rules_version = '2';
+match /users/{userId} {
+  allow get, create, update, delete: if request.auth != null;
+  allow list: if false;          // ← users コレクションの列挙を禁止
 
-service cloud.firestore {
-  match /databases/{database}/documents {
-    // ユーザーごとのデータ（レガシー形式）
-    match /users/{userId} {
-      // 誰でも読み書き可能（シンプルな設定）
-      allow read, write: if true;
-      
-      // サブコレクション: meta（メタデータ）
-      match /meta/{document=**} {
-        allow read, write: if true;
-      }
-      
-      // サブコレクション: collections（問題集データ）
-      match /collections/{collectionId} {
-        allow read, write: if true;
-      }
-    }
+  match /meta/{documentId}       { allow read, write: if request.auth != null; }
+  match /collections/{collectionId} { allow read, write: if request.auth != null; }
+}
+```
+
+- `allow list: if false` により、同期コードを知らない第三者はドキュメントを見つけられません
+- サブコレクション（`meta` / `collections`）はパスに userId を含むため、列挙するには同期コードを知っている必要があります
+
+### ステップ3: 動作確認
+
+ブラウザの開発者ツール（F12）のコンソールで:
+
+```javascript
+await window.firebaseSync.diagnose()
+```
+
+`permission-denied` が出る場合は、ステップ1の匿名認証が有効になっているか確認してください。
+
+---
+
+## 🔐 このルールで守られる範囲
+
+| 脅威 | 対策後 |
+|---|---|
+| 第三者による全データの列挙・ダンプ | ✅ 防げる（`list` 禁止） |
+| 未認証クライアントからの直接アクセス | ✅ 防げる（`request.auth != null`） |
+| 同期コードを知っている人による読み書き | ❌ 防げない（仕様上、コード＝アクセス権） |
+| 同期コードの総当り（32⁶ ≒ 10.7億通り） | ⚠️ 理論上は可能。App Check の併用を推奨 |
+
+**同期コードは共有パスワードと同じもの**として扱ってください。人に見せる画面でコードを表示しない、SNS等に貼らない、といった運用が必要です。
+
+---
+
+## 🔒 より厳密な設定（機密データを扱う場合）
+
+同期コードではなく認証 uid でデータを分離する方式です。
+
+```javascript
+match /users/{userId} {
+  allow read, write: if request.auth != null && request.auth.uid == userId;
+  match /{document=**} {
+    allow read, write: if request.auth != null && request.auth.uid == userId;
   }
 }
 ```
 
-**重要**: `{document=**}` は、そのパス以下のすべてのドキュメントへのアクセスを許可します。
+この方式に移行する場合は、アプリ側も `firebase-sync.js` の `syncCodeToUserId()` を uid ベースに変更する必要があります（同期コードによる複数デバイス共有の仕組みを、アカウント共有または招待方式に作り替えることになります）。
 
-### ステップ3: 公開
+さらに [Firebase App Check](https://firebase.google.com/docs/app-check) を有効にすると、正規のアプリ以外からのアクセスを弾けるため、総当り対策として有効です。
 
-右上の「公開」ボタンをクリック
-
-## 🔒 より安全な設定（推奨）
-
-Firebase Authenticationを使用する場合、以下のルールがより安全です：
-
-```javascript
-rules_version = '2';
-
-service cloud.firestore {
-  match /databases/{database}/documents {
-    // 認証されたユーザーのみ、自分のデータにアクセス可能
-    match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
-      
-      // サブコレクション: meta（メタデータ）
-      match /meta/{document=**} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
-      }
-      
-      // サブコレクション: collections（問題集データ）
-      match /collections/{collectionId} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
-      }
-    }
-  }
-}
-```
-
-service cloud.firestore {
-  match /databases/{database}/documents {
-    // 認証済みユーザーのみアクセス可能
-    match /users/{userId} {
-      allow read, write: if request.auth != null;
-    }
-  }
-}
-```
-
-**注意**: この設定を使用する場合、Firebase Authentication の設定も必要です。
-
-## 🚀 Firebase Authentication の設定（オプション・推奨）
-
-より安全に使うには、認証機能を追加することを推奨します。
-
-### 手順
-
-1. Firebase Console で「構築」→「Authentication」を選択
-2. 「始める」をクリック
-3. 「Sign-in method」タブを選択
-4. 「匿名」を有効化
-   - 「匿名」をクリック
-   - 「有効にする」をON
-   - 「保存」
-
-### アプリケーション側の対応
-
-index.html に以下を追加（Firebase SDK の import 部分）：
-
-```javascript
-import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
-
-const auth = getAuth(app);
-
-// 匿名認証
-signInAnonymously(auth)
-  .then(() => {
-    console.log('Authenticated anonymously');
-  })
-  .catch((error) => {
-    console.error('Auth error:', error);
-  });
-```
-
-## 📊 現在の設定
-
-現在、QuizBook は以下の設定で動作しています：
-
-- **認証**: なし（シンプル設定）
-- **アクセス制御**: ユーザーIDごとに分離
-- **セキュリティ**: 基本レベル（URLを知っている人のみアクセス可能）
-
-## ❓ どの設定を選ぶべきか
-
-| 使用方法 | 推奨設定 |
-|---------|---------|
-| 個人利用のみ | シンプル設定でOK |
-| 複数人で共有 | Firebase Authentication推奨 |
-| 機密情報を含む | Firebase Authentication必須 |
+---
 
 ## 🔧 トラブルシューティング
 
-### エラー: "Missing or insufficient permissions"
+### エラー: "Missing or insufficient permissions" / "PERMISSION_DENIED"
 
-セキュリティルールが正しく設定されていない可能性があります。
-→ Firebase Console でルールを確認してください。
+1. **匿名認証が有効か** — Authentication → Sign-in method →「匿名」が有効になっているか
+2. **ルールが公開済みか** — Firestore Database → ルール で `firestore.rules` の内容になっているか
+3. **テストモードの期限切れ** — 初期状態の30日間テストモードが終了した可能性があります
 
-### エラー: "PERMISSION_DENIED"
+アプリには旧形式（`users/{userId}` 直下に全データを置く形式）へのフォールバックが実装されているため、`permission-denied` が出ても一部は動作します。ただし本来の差分同期は効かなくなるので、根本原因を解消してください。
 
-30日間のテストモード期間が終了した可能性があります。
-→ 上記のルールを設定してください。
+### 認証は通るのにデータが見えない
+
+同期コードが別のものになっている可能性があります。同期ボタンを右クリック（スマホは長押し）して、デバイス間でコードが一致しているか確認してください。
+
+---
 
 ## 📚 参考リンク
 
 - [Firestore セキュリティルール公式ドキュメント](https://firebase.google.com/docs/firestore/security/get-started)
+- [ルールでの list と get の違い](https://firebase.google.com/docs/firestore/security/rules-structure#granular_operations)
 - [Firebase Authentication 公式ドキュメント](https://firebase.google.com/docs/auth)
+- [Firebase App Check](https://firebase.google.com/docs/app-check)

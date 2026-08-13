@@ -404,9 +404,12 @@
     <!-- Firebase SDK -->
     <script type="module">
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
-        import { getFirestore, collection, getDocs, addDoc, updateDoc, deleteDoc, doc, onSnapshot, setDoc, getDoc } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
-        
+        import { getFirestore, collection, getDocs, addDoc, updateDoc, deleteDoc, doc, onSnapshot, setDoc, getDoc, writeBatch } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
+        import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
+
         // Firebase configuration
+        // ※ apiKey は公開されて問題ない識別子です。アクセス制御は Firestore セキュリティルールで行います。
+        //    （firestore.rules / FIRESTORE_SECURITY_GUIDE.md を参照）
         const firebaseConfig = {
             apiKey: "AIzaSyBbRH1NIdQ9qyRZ2ca_JHMGGXLcFmjGQnU",
             authDomain: "quizbook-72cda.firebaseapp.com",
@@ -419,6 +422,7 @@
         // Initialize Firebase
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
+        const auth = getAuth(app);
 
         // Make Firebase available globally
         window.firebaseDB = db;
@@ -431,8 +435,45 @@
             doc,
             onSnapshot,
             setDoc,
-            getDoc
+            getDoc,
+            writeBatch
         };
+
+        // 匿名認証: セキュリティルールで request.auth != null を要求するために必要。
+        // Firebase Console で「Authentication → Sign-in method → 匿名」を有効にしていない場合は
+        // 認証なしのまま続行する（旧ルールでも動くようにするためのフォールバック）。
+        window.firebaseAuthReady = new Promise((resolve) => {
+            let settled = false;
+            const done = (ok) => {
+                if (settled) return;
+                settled = true;
+                resolve(ok);
+            };
+
+            onAuthStateChanged(auth, (user) => {
+                if (user) {
+                    window.firebaseAuthUid = user.uid;
+                    done(true);
+                }
+            });
+
+            signInAnonymously(auth)
+                .then(() => {
+                    console.log('✅ 匿名認証に成功しました');
+                    done(true);
+                })
+                .catch((error) => {
+                    console.warn(
+                        '⚠️ 匿名認証に失敗しました（認証なしで続行します）:',
+                        error.code,
+                        '— Firebase Console で「Authentication → Sign-in method → 匿名」を有効にしてください'
+                    );
+                    done(false);
+                });
+
+            // 認証待ちで起動が止まらないよう上限を設ける
+            setTimeout(() => done(false), 8000);
+        });
     </script>
 
     <!-- 同期オーバーレイ -->

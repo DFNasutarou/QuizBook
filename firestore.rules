@@ -1,0 +1,66 @@
+rules_version = '2';
+
+// QuizBook Firestore セキュリティルール
+// Firebase Console → Firestore Database → ルール に貼り付けて「公開」してください。
+//
+// 【重要】このルールを公開する前に、必ず先に
+//   Authentication → Sign-in method → 「匿名」を有効化
+// してください。順序を逆にすると既存の利用者が permission-denied になります。
+//
+// 設計方針:
+//   - allow list を禁止し、users コレクションの「列挙」を不可能にする。
+//     （以前の `allow read, write: if true` は list も許可していたため、
+//       誰でも全ユーザーの同期コードとデータを一覧取得できる状態でした）
+//   - 匿名認証を必須にして、未認証クライアントからの直接アクセスを遮断する。
+//   - 個々のドキュメントへは「同期コード（= userId）を知っていること」でアクセスできる。
+//     この方式である限り、コードを知る人は誰でも読み書きできます。
+//     機密データを扱う場合は末尾の「より厳密な設定」に移行してください。
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /users/{userId} {
+      // 単体取得と書き込みは許可。ただし list（コレクション列挙）は禁止。
+      allow get, create, update, delete: if request.auth != null;
+      allow list: if false;
+
+      // メタデータ（summary / folders）
+      // パスに userId を含むため、列挙するには同期コードを知っている必要がある
+      match /meta/{documentId} {
+        allow read, write: if request.auth != null;
+      }
+
+      // 問題集本体
+      match /collections/{collectionId} {
+        allow read, write: if request.auth != null;
+      }
+    }
+
+    // 上記以外へのアクセスは全て拒否
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
+// ------------------------------------------------------------------
+// より厳密な設定（機密データを扱う場合・推奨）
+//
+// 同期コードではなく Firebase Authentication の uid でデータを分離します。
+// この方式にする場合、アプリ側も userId を uid ベースに変更する必要があります
+// （firebase-sync.js の syncCodeToUserId を置き換える）。
+//
+// service cloud.firestore {
+//   match /databases/{database}/documents {
+//     match /users/{userId} {
+//       allow read, write: if request.auth != null && request.auth.uid == userId;
+//       match /{document=**} {
+//         allow read, write: if request.auth != null && request.auth.uid == userId;
+//       }
+//     }
+//   }
+// }
+//
+// 併せて Firebase App Check を有効にすると、
+// 正規のアプリ以外からのアクセスを弾けるため総当り対策になります。
+// ------------------------------------------------------------------
