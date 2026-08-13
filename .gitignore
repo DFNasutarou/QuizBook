@@ -49,3 +49,6 @@ desktop.ini
 # 購入した問題集とその変換結果（他者の著作物。個人利用のみ・コミットしない）
 購入問題/
 pdf/
+
+# 特定の問題集専用の変換スクリプト（手元にのみ置く）
+scripts/quiz_import/parse_kotoba_gainen.py
