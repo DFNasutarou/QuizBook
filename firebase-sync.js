@@ -1,4 +1,27 @@
 // Firebase Firestore 同期マネージャー
+
+// デバッグログの有効化:
+//   localStorage.setItem('quizbook_debug', '1') してリロード
+// 通常時は詳細ログを出さないことで、同期のたびに大量の console 出力が出るのを防ぐ。
+window.QUIZBOOK_DEBUG = (() => {
+    try {
+        return localStorage.getItem('quizbook_debug') === '1';
+    } catch (e) {
+        return false;
+    }
+})();
+
+function syncDebugLog(...args) {
+    if (window.QUIZBOOK_DEBUG) console.log(...args);
+}
+
+// Firestore の 1 ドキュメントあたりの上限は 1 MiB。
+// 余裕を持って 900KB を超えたら事前にエラーにし、原因の分かるメッセージを出す。
+const FIRESTORE_DOC_SIZE_LIMIT = 900 * 1024;
+
+// writeBatch の 1 バッチあたりの操作数上限は 500。余裕を見て 400 で分割する。
+const FIRESTORE_BATCH_CHUNK = 400;
+
 class FirebaseSync {
     constructor() {
         this.db = null;
@@ -11,7 +34,7 @@ class FirebaseSync {
 
     async initialize() {
         if (this.initialized) {
-            console.log('ℹ️ Firebase Sync は既に初期化済みです');
+            syncDebugLog('ℹ️ Firebase Sync は既に初期化済みです');
             return;
         }
         
@@ -21,9 +44,22 @@ class FirebaseSync {
             return false;
         }
 
+        // 匿名認証の完了を待つ（セキュリティルールが request.auth != null を要求するため）。
+        // 認証が無効・失敗していても false が返るだけで、旧ルール環境では引き続き動作する。
+        if (window.firebaseAuthReady) {
+            try {
+                const authed = await window.firebaseAuthReady;
+                if (!authed) {
+                    console.warn('⚠️ 認証なしでFirestoreに接続します。セキュリティルールによっては拒否されます。');
+                }
+            } catch (e) {
+                console.warn('⚠️ 認証の待機中にエラーが発生しました:', e);
+            }
+        }
+
         this.db = window.firebaseDB;
         this.initialized = true;
-        
+
         // 既存の同期コードを復元
         const savedCode = localStorage.getItem('quizbook_sync_code');
         if (savedCode) {
@@ -183,15 +219,15 @@ class FirebaseSync {
 
     async readSummary() {
         const { getDoc } = window.firebaseUtils;
-        console.log(`🔍 [DEBUG] サマリー取得を試行: users/${this.userId}/meta/summary`);
+        syncDebugLog(`🔍 [DEBUG] サマリー取得を試行: users/${this.userId}/meta/summary`);
         try {
             const summarySnap = await getDoc(this.getSummaryDocRef());
             if (!summarySnap.exists()) {
-                console.log('🔍 [DEBUG] サマリードキュメントが存在しません');
+                syncDebugLog('🔍 [DEBUG] サマリードキュメントが存在しません');
                 return null;
             }
             const data = summarySnap.data();
-            console.log(`🔍 [DEBUG] サマリー取得成功:`, {
+            syncDebugLog(`🔍 [DEBUG] サマリー取得成功:`, {
                 schemaVersion: data.schemaVersion,
                 totalCollections: data.totalCollections,
                 totalQuizzes: data.totalQuizzes,
@@ -199,7 +235,7 @@ class FirebaseSync {
             });
             return data;
         } catch (error) {
-            console.error(`🔍 [DEBUG] サマリー取得エラー:`, error.code, error.message);
+            syncDebugLog(`🔍 [DEBUG] サマリー取得エラー:`, error.code, error.message);
             throw error;
         }
     }
@@ -241,23 +277,23 @@ class FirebaseSync {
 
     async writeFolders(folders) {
         const { setDoc } = window.firebaseUtils;
-        console.log(`🔍 [DEBUG] フォルダ保存を試行: ${folders?.length || 0}個`, folders?.map(f => f.name));
+        syncDebugLog(`🔍 [DEBUG] フォルダ保存を試行: ${folders?.length || 0}個`, folders?.map(f => f.name));
         try {
             await setDoc(this.getFoldersDocRef(), {
                 schemaVersion: 1,
                 updatedAt: new Date().toISOString(),
                 folders: folders || []
             });
-            console.log(`🔍 [DEBUG] フォルダ保存成功: ${folders?.length || 0}個`);
+            syncDebugLog(`🔍 [DEBUG] フォルダ保存成功: ${folders?.length || 0}個`);
         } catch (error) {
             if (!this.isPermissionDenied(error)) throw error;
-            console.log('🔍 [DEBUG] フォルダ保存がpermission-denied、レガシーフォールバックへ');
+            syncDebugLog('🔍 [DEBUG] フォルダ保存がpermission-denied、レガシーフォールバックへ');
             const legacy = (await this.readLegacyData()) || {};
             await this.writeLegacyData({
                 ...legacy,
                 folders: folders || []
             });
-            console.log('🔍 [DEBUG] レガシー形式でフォルダ保存完了');
+            syncDebugLog('🔍 [DEBUG] レガシー形式でフォルダ保存完了');
         }
     }
 
@@ -272,51 +308,31 @@ class FirebaseSync {
             collections: metas
         };
         
-        console.log(`🔍 [DEBUG] サマリー保存を試行: users/${this.userId}/meta/summary`, {
+        syncDebugLog(`🔍 [DEBUG] サマリー保存を試行: users/${this.userId}/meta/summary`, {
             totalCollections: metas.length,
             totalQuizzes: totalQuizzes
         });
         
         try {
             await setDoc(this.getSummaryDocRef(), summaryData);
-            console.log(`🔍 [DEBUG] サマリー保存成功`);
+            syncDebugLog(`🔍 [DEBUG] サマリー保存成功`);
         } catch (error) {
-            console.error(`🔍 [DEBUG] サマリー保存エラー:`, error.code, error.message);
+            syncDebugLog(`🔍 [DEBUG] サマリー保存エラー:`, error.code, error.message);
             if (!this.isPermissionDenied(error)) throw error;
             // Legacy mode keeps summary inside users/{userId}
-            console.log(`🔍 [DEBUG] レガシーモードにフォールバック`);
+            syncDebugLog(`🔍 [DEBUG] レガシーモードにフォールバック`);
             const legacy = (await this.readLegacyData()) || {};
             await this.writeLegacyData({
                 ...legacy,
                 summary: summaryData
             });
-            console.log(`🔍 [DEBUG] レガシーモードで保存成功`);
-        }
-    }
-
-    async loadFolders() {
-        if (!this.syncEnabled || !this.db) {
-            console.log('ℹ️ フォルダ構成の読み込みはスキップされました（同期が無効またはDBが未接続）');
-            return null;
-        }
-
-        try {
-            const foldersData = await this.readFolders();
-            if (foldersData && Array.isArray(foldersData.folders)) {
-                console.log(`✅ フォルダ構成をクラウドから読み込みました (${foldersData.folders.length}個)`);
-                return foldersData.folders;
-            }
-            console.log('ℹ️ クラウドにフォルダ構成が見つかりません（初回使用）');
-            return null;
-        } catch (error) {
-            console.error('❌ フォルダ構成の読み込みエラー:', error);
-            return null;
+            syncDebugLog(`🔍 [DEBUG] レガシーモードで保存成功`);
         }
     }
 
     async saveFolders(folders) {
         if (!this.syncEnabled || !this.db) {
-            console.log('ℹ️ フォルダ構成の保存はスキップされました（同期が無効またはDBが未接続）');
+            syncDebugLog('ℹ️ フォルダ構成の保存はスキップされました（同期が無効またはDBが未接続）');
             return;
         }
 
@@ -368,7 +384,7 @@ class FirebaseSync {
 
     async loadCollectionMetas() {
         if (!this.syncEnabled || !this.db) {
-            console.log('ℹ️ Firestoreメタデータ読み込みはスキップされました（同期が無効またはDBが未接続）');
+            syncDebugLog('ℹ️ Firestoreメタデータ読み込みはスキップされました（同期が無効またはDBが未接続）');
             return [];
         }
 
@@ -425,7 +441,7 @@ class FirebaseSync {
 
     async loadCollectionById(collectionId) {
         if (!this.syncEnabled || !this.db) {
-            console.log('ℹ️ Firestore問題集読み込みはスキップされました（同期が無効またはDBが未接続）');
+            syncDebugLog('ℹ️ Firestore問題集読み込みはスキップされました（同期が無効またはDBが未接続）');
             return null;
         }
 
@@ -479,9 +495,63 @@ class FirebaseSync {
         }
     }
 
-    async saveCollections(collections) {
+    // 書き込み操作をまとめてコミットする（writeBatch が使えない場合は逐次実行にフォールバック）
+    async commitWrites(writes) {
+        if (!writes.length) return;
+
+        const { writeBatch, setDoc, deleteDoc } = window.firebaseUtils;
+
+        if (typeof writeBatch !== 'function') {
+            for (const write of writes) {
+                if (write.type === 'set') {
+                    await setDoc(write.ref, write.data);
+                } else {
+                    await deleteDoc(write.ref);
+                }
+            }
+            return;
+        }
+
+        for (let i = 0; i < writes.length; i += FIRESTORE_BATCH_CHUNK) {
+            const batch = writeBatch(this.db);
+            for (const write of writes.slice(i, i + FIRESTORE_BATCH_CHUNK)) {
+                if (write.type === 'set') {
+                    batch.set(write.ref, write.data);
+                } else {
+                    batch.delete(write.ref);
+                }
+            }
+            await batch.commit();
+        }
+    }
+
+    // Firestore のドキュメントサイズ上限に引っかかる前に、原因の分かるエラーにする
+    assertDocumentSize(collection, payload) {
+        const size = new TextEncoder().encode(JSON.stringify(payload)).length;
+        if (size > FIRESTORE_DOC_SIZE_LIMIT) {
+            const sizeKB = Math.round(size / 1024);
+            throw new Error(
+                `問題集「${collection.name || collection.id}」が大きすぎてクラウドに保存できません` +
+                `（${sizeKB}KB / 上限約900KB）。問題集を分割してください。`
+            );
+        }
+        return size;
+    }
+
+    /**
+     * 問題集をクラウドへ差分同期する。
+     * @param {Array} collections ローカルの問題集一覧
+     * @param {Object} options
+     * @param {boolean} options.allowDeletions
+     *   true のときだけ「クラウドにあってローカルに無い問題集」を削除する。
+     *   起動時のメタデータ取得に失敗した等、ローカルがクラウドの完全な写しでない可能性がある場合は
+     *   false を渡すこと（false のままだと削除は一切行わない = クラウド側のデータを消さない）。
+     */
+    async saveCollections(collections, options = {}) {
+        const { allowDeletions = false } = options;
+
         if (!this.syncEnabled || !this.db) {
-            console.log('ℹ️ Firestore同期はスキップされました（同期が無効またはDBが未接続）');
+            syncDebugLog('ℹ️ Firestore同期はスキップされました（同期が無効またはDBが未接続）');
             return {
                 uploadedCount: 0,
                 skippedCount: 0,
@@ -490,7 +560,6 @@ class FirebaseSync {
         }
 
         try {
-            const { setDoc, deleteDoc } = window.firebaseUtils;
             const previousMetas = await this.loadCollectionMetas();
             const previousIdSet = new Set(previousMetas.map(meta => meta.id));
             const previousMetaById = new Map(previousMetas.map(meta => [meta.id, meta]));
@@ -500,6 +569,9 @@ class FirebaseSync {
 
             const nextMetas = [];
             const nextIdSet = new Set();
+            const writes = [];
+            // コミット成功後にローカル側へ反映する更新内容
+            const pendingLocalUpdates = [];
             let uploadedCount = 0;
             let skippedCount = 0;
             let deletedCount = 0;
@@ -533,33 +605,56 @@ class FirebaseSync {
 
                 const sanitized = this.sanitizeCollectionForCloud(collection);
                 const lastUpdateId = this.computeCollectionVersionId(collection);
-                collection.lastUpdateId = lastUpdateId;
-                collection.downloadedUpdateId = lastUpdateId;
-                
-                console.log(`🔍 [DEBUG] 問題集保存試行: ${collection.id} (${collection.name})`);
-                try {
-                    await setDoc(this.getCollectionDocRef(collection.id), {
-                        ...sanitized,
-                        lastUpdateId,
-                        updatedAt: new Date().toISOString()
-                    });
-                    console.log(`🔍 [DEBUG] 問題集保存成功: ${collection.id}`);
-                } catch (saveError) {
-                    console.error(`🔍 [DEBUG] 問題集保存エラー: ${collection.id}`, saveError.code, saveError.message);
-                    throw saveError;
-                }
-                // クラウド保存成功後に状態を 'synced' に
-                this.setCollectionSyncStatus(collection, 'synced');
+                const payload = {
+                    ...sanitized,
+                    lastUpdateId,
+                    updatedAt: new Date().toISOString()
+                };
+
+                this.assertDocumentSize(collection, payload);
+
+                writes.push({
+                    type: 'set',
+                    ref: this.getCollectionDocRef(collection.id),
+                    data: payload
+                });
+                pendingLocalUpdates.push({ collection, lastUpdateId });
                 uploadedCount += 1;
             }
 
-            for (const previousId of previousIdSet) {
-                if (!nextIdSet.has(previousId)) {
-                    await deleteDoc(this.getCollectionDocRef(previousId));
-                    console.log(`🗑️ クラウドから問題集を削除: ${previousId}`);
-                    deletedCount += 1;
+            const staleIds = [...previousIdSet].filter(id => !nextIdSet.has(id));
+
+            if (staleIds.length > 0) {
+                // 安全弁1: ローカルの一覧がクラウドの完全な写しだと確認できていない場合は削除しない
+                // 安全弁2: 「ローカルが空なのにクラウドには存在する」場合も削除しない（全消し事故の防止）
+                const isWipe = nextIdSet.size === 0;
+                if (!allowDeletions || isWipe) {
+                    console.warn(
+                        `⚠️ クラウド上の ${staleIds.length} 件の問題集はローカルにありませんが、` +
+                        `安全のため削除しませんでした（${isWipe ? 'ローカルが空のため' : 'ローカル一覧が未確定のため'}）。`
+                    );
+                    // 削除しない以上、サマリーからも消してはいけないので既存メタを残す
+                    staleIds.forEach(id => {
+                        const meta = previousMetaById.get(id);
+                        if (meta) nextMetas.push(meta);
+                    });
+                } else {
+                    staleIds.forEach(id => {
+                        writes.push({ type: 'delete', ref: this.getCollectionDocRef(id) });
+                        console.log(`🗑️ クラウドから問題集を削除: ${id}`);
+                        deletedCount += 1;
+                    });
                 }
             }
+
+            await this.commitWrites(writes);
+
+            // コミットが成功してからローカル状態を更新する
+            pendingLocalUpdates.forEach(({ collection, lastUpdateId }) => {
+                collection.lastUpdateId = lastUpdateId;
+                collection.downloadedUpdateId = lastUpdateId;
+                this.setCollectionSyncStatus(collection, 'synced');
+            });
 
             await this.writeSummary(nextMetas);
             console.log(`✅ Firestoreへの同期が完了しました (更新:${uploadedCount}, スキップ:${skippedCount}, 削除:${deletedCount})`);
@@ -594,7 +689,7 @@ class FirebaseSync {
 
     async loadCollections() {
         if (!this.syncEnabled || !this.db) {
-            console.log('ℹ️ Firestoreからの読み込みはスキップされました（同期が無効またはDBが未接続）');
+            syncDebugLog('ℹ️ Firestoreからの読み込みはスキップされました（同期が無効またはDBが未接続）');
             return null;
         }
 
@@ -606,11 +701,10 @@ class FirebaseSync {
                 return [];
             }
 
-            const loadedCollections = [];
-            for (const meta of metas) {
-                const collection = await this.loadCollectionById(meta.id);
-                if (collection) loadedCollections.push(collection);
-            }
+            // 逐次だと問題集の数だけ往復が発生するため並列に取得する
+            const loadedCollections = (
+                await Promise.all(metas.map(meta => this.loadCollectionById(meta.id)))
+            ).filter(Boolean);
 
             const totalQuizzes = loadedCollections.reduce((sum, c) => sum + (c.quizzes?.length || 0), 0);
             console.log(`✅ Firestoreから読み込み成功 (${loadedCollections.length}問題集, ${totalQuizzes}問)`);
@@ -624,60 +718,33 @@ class FirebaseSync {
     async loadCollectionsByFolder(folderName) {
         const metas = await this.loadCollectionMetas();
         const targetMetas = metas.filter(meta => (meta.folder || '未分類') === folderName);
-        const results = [];
-        for (const meta of targetMetas) {
-            const collection = await this.loadCollectionById(meta.id);
-            if (collection) results.push(collection);
-        }
-        return results;
+        // 逐次だと問題集の数だけ往復が発生するため並列に取得する
+        return (
+            await Promise.all(targetMetas.map(meta => this.loadCollectionById(meta.id)))
+        ).filter(Boolean);
     }
 
-    async deleteCollectionById(collectionId) {
-        if (!this.syncEnabled || !this.db) return;
+    /**
+     * クラウド上の全問題集を削除する。
+     * 通常の差分同期では安全弁により全消しは行わないため、
+     * ユーザーが明示的に「クラウドも消す」を選んだときだけ呼び出すこと。
+     */
+    async deleteAllCollections() {
+        if (!this.syncEnabled || !this.db) return 0;
 
-        try {
-            const { deleteDoc } = window.firebaseUtils;
-            await deleteDoc(this.getCollectionDocRef(collectionId));
+        const metas = await this.loadCollectionMetas();
+        const writes = metas
+            .filter(meta => meta && meta.id)
+            .map(meta => ({ type: 'delete', ref: this.getCollectionDocRef(meta.id) }));
 
-            const metas = await this.loadCollectionMetas();
-            const nextMetas = metas.filter(meta => meta.id !== collectionId);
-            await this.writeSummary(nextMetas);
+        await this.commitWrites(writes);
+        await this.writeSummary([]);
 
-            console.log(`✅ 問題集をクラウドから削除しました: ${collectionId}`);
-        } catch (error) {
-            console.error(`❌ 問題集削除エラー (${collectionId}):`, error);
-            throw error;
-        }
+        console.log(`🗑️ クラウドの全問題集を削除しました (${writes.length}件)`);
+        return writes.length;
     }
 
-    startRealtimeSync(callback) {
-        if (!this.syncEnabled || !this.db) {
-            console.log('ℹ️ リアルタイム同期はスキップされました（同期が無効またはDBが未接続）');
-            return;
-        }
 
-        try {
-            const { onSnapshot, doc } = window.firebaseUtils;
-            const docRef = doc(this.db, 'users', this.userId, 'meta', 'summary');
-            
-            this.unsubscribe = onSnapshot(docRef, (docSnap) => {
-                if (docSnap.exists()) {
-                    const data = docSnap.data();
-                    const collections = data.collections || [];
-                    const totalQuizzes = collections.reduce((sum, c) => sum + (c.quizzes?.length || 0), 0);
-                    console.log(`🔄 メタデータ更新を受信しました (${collections.length}問題集, ${totalQuizzes}問)`);
-                    callback(collections);
-                }
-            }, (error) => {
-                console.error('❌ リアルタイム同期エラー:', error);
-            });
-            
-            console.log('✅ リアルタイム同期を開始しました');
-        } catch (error) {
-            console.error('❌ リアルタイム同期の開始に失敗:', error);
-        }
-    }
-    
     // ========================================
     // デバッグ用ヘルパー関数
     // ========================================

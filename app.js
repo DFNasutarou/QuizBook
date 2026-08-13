@@ -1,5 +1,24 @@
 // 早押しクイズ管理ツール - JavaScript
 
+// 詳細ログ（window.QUIZBOOK_DEBUG は firebase-sync.js で定義される）
+// 有効化: localStorage.setItem('quizbook_debug', '1') してリロード
+function appDebugLog(...args) {
+    if (window.QUIZBOOK_DEBUG) console.log(...args);
+}
+
+// innerHTML に流し込む前のエスケープ。
+// 問題文・答え・フォルダ名などはCSV/JSON取り込みやクラウド同期で外部から入りうるため、
+// HTMLとして解釈させない。
+function escapeHtml(text) {
+    if (text === null || text === undefined) return '';
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 class QuizManager {
     constructor() {
         this.isViewMode = new URLSearchParams(window.location.search).has('view');
@@ -21,7 +40,12 @@ class QuizManager {
         this.syncEnabled = false;  // 同期状態
         this.isLoadingFromFirestore = false;  // Firestoreからの読み込み中フラグ
         this.cloudSaveTimer = null;
-        this.cloudSaveDelayMs = 15000;
+        // 遅延アップロードまでの待ち時間。長すぎるとタブを閉じたときの取りこぼしが増える
+        this.cloudSaveDelayMs = 5000;
+        // クラウドの問題集一覧を正常に取得できたか。
+        // false のあいだは「クラウドにあってローカルに無い問題集」の削除を行わない
+        // （取得失敗時にローカルの部分的な状態でクラウドを消してしまう事故を防ぐ）
+        this.cloudViewComplete = false;
         this.defaultFolderName = '未分類';
         this.folders = [
             {
@@ -44,7 +68,6 @@ class QuizManager {
         this.currentTab = 'manage';
         this.contextMenuType = null;
         this.contextMenuTarget = null;
-        this.lastSelectionSource = 'folder';
         this._collectionMoveState = {
             sourceFolderId: null,
             destFolderId: null,
@@ -69,6 +92,7 @@ class QuizManager {
         this.loadFromLocalStorage();
         this.setupEventListeners();
         this.setupKeyboardShortcuts();
+        this.setupUnloadFlush();
         this.updateUI();
         this.applySettings();
         if (this.isViewMode) this.applyViewMode();
@@ -187,27 +211,6 @@ class QuizManager {
         });
 
         this.updateFolderStats();
-        this.updateMoveCollectionFolderTarget();
-    }
-
-    updateMoveCollectionFolderTarget() {
-        const select = document.getElementById('moveCollectionFolderTarget');
-        if (!select) return;
-
-        const currentFolder = this.currentCollection
-            ? (this.currentCollection.folder || this.defaultFolderName)
-            : '';
-
-        select.innerHTML = '<option value="">移動先フォルダ...</option>';
-        this.folders.forEach(folder => {
-            const option = document.createElement('option');
-            option.value = folder.name;
-            option.textContent = folder.name;
-            if (currentFolder && currentFolder === folder.name) {
-                option.selected = true;
-            }
-            select.appendChild(option);
-        });
     }
 
     updateFolderStats() {
@@ -229,7 +232,6 @@ class QuizManager {
 
     selectFolder(folderId) {
         this.selectedFolderId = folderId;
-        this.lastSelectionSource = 'folder';
         const visible = this.getVisibleCollections();
         this.currentCollection = visible.length > 0 ? visible[0] : null;
         this.currentQuiz = null;
@@ -253,36 +255,6 @@ class QuizManager {
             maxQuizzes: 5000
         };
         this.folders.push(folder);
-        this.selectedFolderId = folder.id;
-        this.updateUI();
-        this.saveToLocalStorage();
-    }
-
-    moveCurrentCollectionToFolder() {
-        if (!this.currentCollection) {
-            alert('問題集を選択してください');
-            return;
-        }
-
-        const targetSelect = document.getElementById('moveCollectionFolderTarget');
-        const targetName = targetSelect ? targetSelect.value : '';
-        if (!targetName) {
-            alert('移動先フォルダを選択してください');
-            return;
-        }
-
-        const folder = this.folders.find(f => f.name === targetName);
-        if (!folder) {
-            alert('指定したフォルダは存在しません。');
-            return;
-        }
-        if ((this.currentCollection.folder || this.defaultFolderName) === folder.name) {
-            return;
-        }
-        if (!this.canAddCollectionToFolder(folder.name)) return;
-        if (!this.canAddQuizzesToFolder(folder.name, this.getCollectionQuizCount(this.currentCollection))) return;
-
-        this.currentCollection.folder = folder.name;
         this.selectedFolderId = folder.id;
         this.updateUI();
         this.saveToLocalStorage();
@@ -342,7 +314,7 @@ class QuizManager {
             this.showNotification(`<strong>📥 フォルダを取得しました</strong><br><small>${loadedCount}件DL / ${skipCount}件は最新</small>`, 'success');
         } catch (error) {
             this.hideSyncOverlay();
-            this.showNotification(`<strong>⚠️ フォルダDLに失敗</strong><br><small>${error.message}</small>`, 'error');
+            this.showNotification(`<strong>⚠️ フォルダDLに失敗</strong><br><small>${escapeHtml(error.message)}</small>`, 'error');
         }
     }
 
@@ -370,9 +342,52 @@ class QuizManager {
             clearTimeout(this.cloudSaveTimer);
         }
         this.cloudSaveTimer = setTimeout(() => {
-            this.uploadToCloud();
             this.cloudSaveTimer = null;
+            this.uploadToCloud();
         }, this.cloudSaveDelayMs);
+    }
+
+    setupUnloadFlush() {
+        // 遅延アップロードの待機中にタブを閉じると、その変更がクラウドへ届かない。
+        // 離脱を検知したら即座にアップロードを開始する（ベストエフォート）。
+        // 送信が間に合わなかった場合でもローカルには保存済みで、
+        // 次回起動時のマージ処理（mergeCollectionsWithCloudMetas）で消えないようにしてある。
+        const flush = () => {
+            if (!this.cloudSaveTimer) return;
+            clearTimeout(this.cloudSaveTimer);
+            this.cloudSaveTimer = null;
+            this.uploadToCloud();
+        };
+
+        window.addEventListener('pagehide', flush);
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') flush();
+        });
+    }
+
+    /**
+     * クラウドのメタデータ一覧とローカルの問題集をマージする。
+     * 単純に置き換えるとクラウド未アップロードの問題集が消えてしまうため、
+     * 「一度も同期されていないローカル限定の問題集」だけを残す。
+     * （同期済みなのにクラウドに無い = 他デバイスで削除された、とみなして残さない）
+     */
+    mergeCollectionsWithCloudMetas(metas) {
+        const merged = this.buildCollectionsFromCloudMetas(metas);
+        const cloudIds = new Set(metas.map(meta => meta.id));
+
+        const neverSyncedLocals = this.collections.filter(col =>
+            col &&
+            !cloudIds.has(col.id) &&
+            this.isCollectionDownloaded(col) &&
+            !col.lastUpdateId &&
+            !col.downloadedUpdateId
+        );
+
+        if (neverSyncedLocals.length > 0) {
+            console.log(`📌 未アップロードの問題集を保持します: ${neverSyncedLocals.map(c => c.name).join(', ')}`);
+        }
+
+        return [...merged, ...neverSyncedLocals];
     }
 
     buildCollectionsFromCloudMetas(metas) {
@@ -414,40 +429,82 @@ class QuizManager {
         });
     }
 
+    /**
+     * 指定した問題集の本文をクラウドから取得してローカルへ反映する。
+     * 対象は引数で受け取った参照に固定するため、ダウンロード中にユーザーが
+     * 別の問題集へ切り替えても、取得結果が別の問題集に書き込まれることはない。
+     */
+    async downloadCollection(target) {
+        if (!target || !this.syncEnabled || !window.firebaseSync) return false;
+
+        const targetId = target.id;
+        const targetName = target.name;
+        const expectedUpdateId = target.lastUpdateId || null;
+
+        target.syncStatus = 'syncing';
+        this.updateCollectionList();
+        this.showSyncOverlay('📥 問題集をダウンロード中...', `「${targetName}」を取得しています`);
+
+        let loaded = null;
+        try {
+            loaded = await window.firebaseSync.loadCollectionById(targetId);
+        } catch (error) {
+            console.error('❌ 問題集のダウンロードに失敗:', error);
+        } finally {
+            this.hideSyncOverlay();
+        }
+
+        const idx = this.collections.findIndex(c => c.id === targetId);
+
+        if (!loaded) {
+            if (idx !== -1) {
+                this.collections[idx].syncStatus = 'error';
+                this.updateCollectionList();
+            }
+            return false;
+        }
+
+        if (idx === -1) {
+            // ダウンロード中にローカルから削除された
+            console.warn(`⚠️ ダウンロード完了時に問題集が見つかりません: ${targetId}`);
+            return false;
+        }
+
+        const updateId = expectedUpdateId || loaded.lastUpdateId || null;
+        this.collections[idx] = {
+            ...loaded,
+            folder: loaded.folder || target.folder || this.defaultFolderName,
+            isCloudPlaceholder: false,
+            isDownloaded: true,
+            quizCount: loaded.quizzes.length,
+            lastUpdateId: updateId,
+            downloadedUpdateId: updateId,
+            syncStatus: 'synced'
+        };
+
+        // 表示中の問題集が対象だった場合のみ選択を差し替える
+        if (this.currentCollection && this.currentCollection.id === targetId) {
+            this.currentCollection = this.collections[idx];
+        }
+
+        this.isLoadingFromFirestore = true;
+        this.saveToLocalStorage();
+        this.isLoadingFromFirestore = false;
+        this.updateUI();
+
+        return true;
+    }
+
     async downloadCollectionIfNeeded(collection) {
         if (!collection || this.isCollectionDownloaded(collection) || !this.syncEnabled || !window.firebaseSync) {
             return true;
         }
 
-        this.showSyncOverlay('📥 問題集をダウンロード中...', `「${collection.name}」を取得しています`);
-        const loaded = await window.firebaseSync.loadCollectionById(collection.id);
-        this.hideSyncOverlay();
-
-        if (!loaded) {
+        const success = await this.downloadCollection(collection);
+        if (!success) {
             alert('問題集のダウンロードに失敗しました。ネットワーク接続を確認してください。');
-            return false;
         }
-
-        const idx = this.collections.findIndex(c => c.id === collection.id);
-        if (idx !== -1) {
-            this.collections[idx] = {
-                ...loaded,
-                folder: loaded.folder || collection.folder || '未分類',
-                isCloudPlaceholder: false,
-                isDownloaded: true,
-                quizCount: loaded.quizzes.length,
-                lastUpdateId: collection.lastUpdateId || loaded.lastUpdateId || null,
-                downloadedUpdateId: collection.lastUpdateId || loaded.lastUpdateId || null,
-                syncStatus: 'synced'
-            };
-            this.currentCollection = this.collections[idx];
-            this.isLoadingFromFirestore = true;
-            this.saveToLocalStorage();
-            this.isLoadingFromFirestore = false;
-            this.updateUI();
-        }
-
-        return true;
+        return success;
     }
 
     setupKeyboardShortcuts() {
@@ -607,14 +664,20 @@ class QuizManager {
         document.getElementById('closeCandidatesBtn').addEventListener('click', () => this.toggleCandidatesSidebar());
 
         // 設定
-        document.getElementById('fontSizeSlider').addEventListener('input', (e) => {
+        // input = 表示だけ即時反映 / change = ドラッグ終了時に1回だけ保存
+        const fontSizeSlider = document.getElementById('fontSizeSlider');
+        fontSizeSlider.addEventListener('input', (e) => {
             this.settings.fontSize = parseInt(e.target.value);
             this.applySettings();
         });
-        document.getElementById('quizFontSizeSlider').addEventListener('input', (e) => {
+        fontSizeSlider.addEventListener('change', () => this.saveToLocalStorage());
+
+        const quizFontSizeSlider = document.getElementById('quizFontSizeSlider');
+        quizFontSizeSlider.addEventListener('input', (e) => {
             this.settings.quizFontSize = parseInt(e.target.value);
             this.applySettings();
         });
+        quizFontSizeSlider.addEventListener('change', () => this.saveToLocalStorage());
         document.getElementById('clearDataBtn').addEventListener('click', () => this.clearAllData());
 
         // 事実確認
@@ -640,15 +703,12 @@ class QuizManager {
         const contextMenu = document.getElementById('contextMenu');
         if (contextMenu) {
             contextMenu.addEventListener('click', (e) => {
-                console.log('🔍 [DEBUG] コンテキストメニューがクリックされました');
                 if (e.target.classList.contains('context-menu-item')) {
                     const action = e.target.dataset.action;
-                    console.log(`🔍 [DEBUG] メニューアイテムクリック: ${action}`);
+                    appDebugLog(`🔍 [DEBUG] メニューアイテムクリック: ${action}`);
                     e.stopPropagation(); // ドキュメントクリックへの伝播を防ぐ
                     this.handleContextMenuAction(action);
                     this.hideContextMenu();
-                } else {
-                    console.log('🔍 [DEBUG] メニュー外をクリック');
                 }
             });
         }
@@ -656,33 +716,49 @@ class QuizManager {
 
     showContextMenu(e, type) {
         e.preventDefault();
-        console.log(`🔍 [DEBUG] 右クリックメニュー表示: type=${type}`);
-        console.log(`🔍 [DEBUG] e.target:`, e.target);
-        console.log(`🔍 [DEBUG] e.currentTarget:`, e.currentTarget);
+        appDebugLog(`🔍 [DEBUG] 右クリックメニュー表示: type=${type}`, e.target);
         this.contextMenuType = type;
-        
-        // selectタグを確実に取得（e.targetがoptionの場合もあるため）
+
         const selectElement = e.currentTarget.tagName === 'SELECT' ? e.currentTarget : e.target.closest('select');
-        console.log(`🔍 [DEBUG] selectElement:`, selectElement);
-        
         if (!selectElement) {
             console.warn('⚠️ select要素が見つかりません');
             return;
         }
-        
-        if (type === 'collection') {
-            const selectedIdx = selectElement.selectedIndex;
-            console.log(`🔍 [DEBUG] 選択インデックス: ${selectedIdx}`);
-            if (selectedIdx < 0) return;
-            this.contextMenuTarget = this.getVisibleCollections()[selectedIdx];
-            console.log(`🔍 [DEBUG] 対象問題集:`, this.contextMenuTarget?.name);
-        } else if (type === 'folder') {
-            const selectedIdx = selectElement.selectedIndex;
-            console.log(`🔍 [DEBUG] 選択インデックス: ${selectedIdx}`);
-            if (selectedIdx < 0) return;
-            this.contextMenuTarget = this.folders[selectedIdx];
-            console.log(`🔍 [DEBUG] 対象フォルダ:`, this.contextMenuTarget?.name, `ID: ${this.contextMenuTarget?.id}`);
+
+        // 右クリックされた option を特定する。
+        // selectedIndex だけを見ていると「今選択中の項目」が対象になり、
+        // 右クリックした項目とは別のものを削除・改名してしまう
+        // （ブラウザによっては右クリックで選択が移動しないため）。
+        const option = e.target.closest('option');
+        const targetId = option
+            ? option.value
+            : (selectElement.selectedIndex >= 0 ? selectElement.options[selectElement.selectedIndex].value : null);
+
+        if (!targetId) {
+            appDebugLog('🔍 [DEBUG] 右クリック位置に対象がありません');
+            return;
         }
+
+        this.contextMenuTarget = (type === 'folder')
+            ? this.folders.find(folder => folder.id === targetId)
+            : this.collections.find(collection => collection.id === targetId);
+
+        if (!this.contextMenuTarget) {
+            console.warn('⚠️ 右クリック対象が見つかりません:', targetId);
+            return;
+        }
+
+        // 右クリックした項目を選択状態にして、操作対象を目で確認できるようにする
+        if (option && selectElement.value !== targetId) {
+            if (type === 'folder') {
+                this.selectFolder(targetId);
+            } else {
+                this.selectCollection(targetId);
+                selectElement.value = targetId;
+            }
+        }
+
+        appDebugLog(`🔍 [DEBUG] 対象: ${this.contextMenuTarget.name} (${targetId})`);
 
         const contextMenu = document.getElementById('contextMenu');
         const csvExportItem = contextMenu.querySelector('[data-action="csv-export"]');
@@ -703,126 +779,83 @@ class QuizManager {
     }
 
     handleContextMenuAction(action) {
-        console.log(`🔍 [DEBUG] コンテキストメニューアクション: action=${action}, type=${this.contextMenuType}`);
-        console.log(`🔍 [DEBUG] 対象:`, this.contextMenuTarget);
-        
+        appDebugLog(`🔍 [DEBUG] コンテキストメニューアクション: ${action} / ${this.contextMenuType}`, this.contextMenuTarget);
+
         if (!this.contextMenuTarget) {
             console.warn('⚠️ contextMenuTarget が null です');
             return;
         }
 
         if (action === 'rename') {
-            console.log('🔍 [DEBUG] 名前変更処理を開始');
             this.startInlineEdit(this.contextMenuType);
         } else if (action === 'delete') {
-            console.log('🔍 [DEBUG] 削除処理を開始');
             this.deleteFromContextMenu(this.contextMenuType);
         } else if (action === 'csv-export') {
-            console.log('🔍 [DEBUG] CSV出力処理を開始');
             this.exportCollectionAsCSV(this.contextMenuTarget);
         }
     }
 
     startInlineEdit(type) {
-        console.log(`🔍 [DEBUG] startInlineEdit開始: type=${type}`);
         const target = this.contextMenuTarget;
-        console.log('🔍 [DEBUG] target:', target);
-        const listElement = (type === 'folder') 
-            ? document.getElementById('folderList')
-            : document.getElementById('collectionList');
-        
-        console.log('🔍 [DEBUG] listElement:', listElement);
-        if (!listElement) {
-            console.warn('⚠️ リスト要素が見つかりません');
-            return;
-        }
+        if (!target) return;
 
-        const selectedIdx = listElement.selectedIndex;
-        console.log(`🔍 [DEBUG] selectedIdx: ${selectedIdx}`);
-        if (selectedIdx < 0) {
-            console.warn('⚠️ 選択されているアイテムがありません');
-            return;
-        }
-
-        const option = listElement.options[selectedIdx];
-        const oldName = option.text.split(' 🟢🟡🔴⚪')[0].trim();
-        console.log(`🔍 [DEBUG] 現在の名前: "${oldName}"`);
-        
-        // 現在のオプションを一時的に削除
-        option.remove();
-        
-        // 入力欄を作成
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.className = 'inline-edit-input';
-        input.value = oldName;
-        
-        // optionの代わりにinputを作成（select内に直接は入れられないので、代替手段を使用）
-        // select内に直接入力欄は入れられないため、ユーザー入力を促すダイアログを使う
-        console.log('🔍 [DEBUG] プロンプトダイアログを表示します...');
+        // 表示文字列（"名前 (12問)  🟢 同期済み"）を parse すると
+        // 問題数や同期状態まで名前に混ざってしまうため、データ側の名前をそのまま使う
+        const oldName = target.name;
         const newName = prompt('新しい名前を入力してください:', oldName);
-        console.log(`🔍 [DEBUG] 入力された名前: "${newName}"`);
-        
-        if (newName && newName !== oldName) {
-            if (type === 'folder') {
-                console.log('🔍 [DEBUG] フォルダ名変更を実行');
-                this.renameFolderInline(target, newName);
-            } else {
-                this.renameCollectionInline(target, newName);
-            }
-        }
-        
-        // オプションを再度追加
+
+        if (!newName || newName === oldName) return;
+
         if (type === 'folder') {
-            const idx = this.folders.indexOf(target);
-            if (idx >= 0) {
-                this.updateFolderList();
-            }
+            this.renameFolderInline(target, newName);
         } else {
-            const idx = this.getVisibleCollections().indexOf(target);
-            if (idx >= 0) {
-                this.updateCollectionList();
-            }
+            this.renameCollectionInline(target, newName);
         }
     }
 
     renameFolderInline(folder, newName) {
-        if (!newName.trim()) {
+        const trimmed = newName.trim();
+        if (!trimmed) {
             alert('フォルダ名を入力してください');
             return;
         }
 
         const oldName = folder.name;
-        console.log(`🔍 [DEBUG] フォルダ名変更開始: "${oldName}" → "${newName}"`);
-        console.log('🔍 [DEBUG] 変更前のフォルダ一覧:', this.folders.map(f => f.name));
-        
-        folder.name = newName;
-        
+        if (trimmed === oldName) return;
+
+        // フォルダは名前で問題集と紐づいているため、同名が2つあると区別できなくなる
+        if (this.folders.some(f => f !== folder && f.name === trimmed)) {
+            alert('同名のフォルダが既に存在します。');
+            return;
+        }
+
+        folder.name = trimmed;
+
         // 同じフォルダ配下のすべての問題集のfolderプロパティを更新
         let updatedCount = 0;
         this.collections.forEach(col => {
             if (col.folder === oldName) {
-                col.folder = newName;
+                col.folder = trimmed;
                 updatedCount++;
             }
         });
 
-        console.log(`📁 フォルダ名を変更: "${oldName}" → "${newName}" (${updatedCount}個の問題集を更新)`);
-        console.log('🔍 [DEBUG] 変更後のフォルダ一覧:', this.folders.map(f => f.name));
+        console.log(`📁 フォルダ名を変更: "${oldName}" → "${trimmed}" (${updatedCount}個の問題集を更新)`);
         this.updateUI();
         this.saveToLocalStorage();
     }
 
     renameCollectionInline(collection, newName) {
-        if (!newName.trim()) {
+        const trimmed = newName.trim();
+        if (!trimmed) {
             alert('問題集名を入力してください');
             return;
         }
 
         const oldName = collection.name;
-        collection.name = newName;
+        collection.name = trimmed;
 
-        console.log(`📚 問題集名を変更: "${oldName}" → "${newName}"`);
+        console.log(`📚 問題集名を変更: "${oldName}" → "${trimmed}"`);
         this.updateUI();
         this.saveToLocalStorage();
     }
@@ -840,8 +873,7 @@ class QuizManager {
                 return;
             }
 
-            console.log(`🔍 [DEBUG] フォルダ削除開始: "${target.name}" (ID: ${target.id})`);
-            console.log('🔍 [DEBUG] 削除前のフォルダ一覧:', this.folders.map(f => `${f.name} (${f.id})`));
+            appDebugLog(`🔍 [DEBUG] フォルダ削除開始: "${target.name}" (ID: ${target.id})`);
 
             // フォルダ内のすべての問題集をデフォルトフォルダに移動
             let movedCount = 0;
@@ -852,14 +884,10 @@ class QuizManager {
                 }
             });
 
-            const beforeCount = this.folders.length;
             this.folders = this.folders.filter(f => f.id !== target.id);
-            const afterCount = this.folders.length;
             this.selectedFolderId = 'folder_default';
 
             console.log(`🗑️ フォルダを削除: "${target.name}" (${movedCount}個の問題集を移動)`);
-            console.log(`🔍 [DEBUG] フォルダ数: ${beforeCount} → ${afterCount}`);
-            console.log('🔍 [DEBUG] 削除後のフォルダ一覧:', this.folders.map(f => `${f.name} (${f.id})`));
             this.updateUI();
             this.saveToLocalStorage();
         } else {
@@ -889,66 +917,38 @@ class QuizManager {
         this.exportCsv();
     }
 
-    downloadCurrentCollectionFromCloud() {
+    async downloadCurrentCollectionFromCloud() {
         if (!this.currentCollection) {
             alert('ダウンロードする問題集を選択してください');
             return;
         }
-        
+
         if (!this.syncEnabled || !window.firebaseSync) {
             alert('クラウド同期が有効になっていません');
             return;
         }
 
-        if (this.isCollectionDownloaded(this.currentCollection)
-            && this.currentCollection.lastUpdateId
-            && this.currentCollection.downloadedUpdateId
-            && this.currentCollection.lastUpdateId === this.currentCollection.downloadedUpdateId) {
-            this.currentCollection.syncStatus = 'synced';
+        const target = this.currentCollection;
+
+        if (this.isCollectionDownloaded(target)
+            && target.lastUpdateId
+            && target.downloadedUpdateId
+            && target.lastUpdateId === target.downloadedUpdateId) {
+            target.syncStatus = 'synced';
             this.updateCollectionList();
             this.showNotification('<strong>✅ すでに最新です</strong><br><small>ダウンロードは不要でした</small>', 'info');
             return;
         }
 
-        this.currentCollection.syncStatus = 'syncing';
-        this.updateCollectionList();
-        this.showSyncOverlay('📥 ダウンロード中...', `「${this.currentCollection.name}」を取得しています`);
-        
-        window.firebaseSync.loadCollectionById(this.currentCollection.id).then(loaded => {
-            this.hideSyncOverlay();
-            
-            if (!loaded) {
-                this.currentCollection.syncStatus = 'error';
-                this.updateCollectionList();
-                alert('ダウンロードに失敗しました');
-                return;
-            }
-            
-            const idx = this.collections.findIndex(c => c.id === this.currentCollection.id);
-            if (idx !== -1) {
-                this.collections[idx] = {
-                    ...loaded,
-                    folder: loaded.folder || this.currentCollection.folder || '未分類',
-                    isCloudPlaceholder: false,
-                    isDownloaded: true,
-                    quizCount: loaded.quizzes.length,
-                    lastUpdateId: this.currentCollection.lastUpdateId || loaded.lastUpdateId || null,
-                    downloadedUpdateId: this.currentCollection.lastUpdateId || loaded.lastUpdateId || null,
-                    syncStatus: 'synced'
-                };
-                this.currentCollection = this.collections[idx];
-                this.updateUI();
-                this.saveToLocalStorage();
-                alert('ダウンロードが完了しました');
-            }
-        }).catch(() => {
-            this.hideSyncOverlay();
-            if (this.currentCollection) {
-                this.currentCollection.syncStatus = 'error';
-                this.updateCollectionList();
-            }
-            alert('ダウンロードに失敗しました');
-        });
+        const success = await this.downloadCollection(target);
+        if (success) {
+            this.showNotification(
+                `<strong>📥 ダウンロードが完了しました</strong><br><small>${escapeHtml(target.name)}</small>`,
+                'success'
+            );
+        } else {
+            this.showNotification('<strong>⚠️ ダウンロードに失敗しました</strong>', 'error');
+        }
     }
 
     // ================== タブ切り替え ==================
@@ -969,12 +969,8 @@ class QuizManager {
         });
         document.getElementById(`${tabName}-tab`).classList.add('active');
 
-        if (tabName === 'quiz-organize') {
-            this.updateQuizManageList();
-        }
-        if (tabName === 'collection-folder-move') {
-            this.updateCollectionFolderMoveUI();
-        }
+        // 表示するタイミングで中身を組み立てる
+        this.renderActiveTab();
     }
 
     // ================== 問題集管理 ==================
@@ -1006,15 +1002,11 @@ class QuizManager {
         this.saveToLocalStorage();
     }
 
-    async selectCollection(collectionId) {
-        this.lastSelectionSource = 'collection';
+    selectCollection(collectionId) {
         this.currentCollection = this.collections.find(c => c.id === collectionId) || null;
         this.currentQuiz = null;
 
-        this.updateQuizList();
-        this.updateMoveCollectionFolderTarget();
-        this.updateQuizManageCollectionSelect();
-        this.updateQuizManageList();
+        this.renderActiveTab();
     }
 
     async startQuizFromCollection() {
@@ -1308,16 +1300,39 @@ class QuizManager {
     // ================== UI更新 ==================
     updateUI() {
         this.ensureFoldersFromCollections();
+        this.updateGenreFilters();
         this.updateFolderList();
         this.updateCollectionList();
-        this.updateQuizList();
-        this.updateQuizManageCollectionSelect();
-        this.updateQuizManageList();
-        this.updateGenreFilters();
-        this.updateQuizFolderCheckboxes();
-        this.updateQuizCollectionCheckboxes();
-        this.updateMoveCollectionSelects();
-        this.updateCollectionFolderMoveUI();
+        // 表示されていないタブまで毎回描画すると、問題数に比例して重くなるため
+        // アクティブなタブの中身だけを組み立てる（タブ切り替え時に再描画される）
+        this.renderActiveTab();
+    }
+
+    renderActiveTab() {
+        switch (this.currentTab) {
+            case 'manage':
+                this.updateQuizList();
+                break;
+            case 'quiz-organize':
+                this.updateQuizManageCollectionSelect();
+                this.updateQuizManageList();
+                break;
+            case 'move':
+                this.updateMoveCollectionSelects();
+                break;
+            case 'collection-folder-move':
+                this.updateCollectionFolderMoveUI();
+                break;
+            case 'quiz':
+                this.updateQuizFolderCheckboxes();
+                this.updateQuizCollectionCheckboxes();
+                break;
+            case 'candidates':
+                this.updateCandidatesUI();
+                break;
+            default:
+                break;
+        }
     }
 
     updateCollectionList() {
@@ -1378,14 +1393,94 @@ class QuizManager {
         this.filterQuizzes();
     }
 
+    difficultyLabel(difficulty) {
+        // 難易度は 1〜10 の数値。
+        // 未設定や範囲外の値が入っていても "undefined" と表示させない
+        const level = parseInt(difficulty, 10);
+        return (!isNaN(level) && level >= 1 && level <= 10) ? String(level) : '-';
+    }
+
+    /**
+     * 問題1件分のDOMを組み立てる（問題一覧タブと並び替えタブで共用）。
+     * 文字列は全て textContent で入れるため、問題文にHTMLが含まれていても解釈されない。
+     */
+    buildQuizItem(quiz, options = {}) {
+        const { draggable = false, showTags = true } = options;
+
+        const item = document.createElement('div');
+        item.className = 'quiz-item';
+        item.dataset.genre = quiz.genre;
+        item.dataset.quizId = quiz.id;
+        item.draggable = draggable;
+
+        if (this.currentQuiz && quiz.id === this.currentQuiz.id) {
+            item.classList.add('selected');
+        }
+
+        const questionDiv = document.createElement('div');
+        questionDiv.className = 'quiz-item-question';
+        questionDiv.textContent = this.stripFormatting(quiz.question);
+
+        const answerDiv = document.createElement('div');
+        answerDiv.className = 'quiz-item-answer';
+        answerDiv.textContent = `答: ${this.stripFormatting(quiz.answer)}`;
+
+        const tagsDiv = document.createElement('div');
+        tagsDiv.className = 'quiz-item-tags';
+
+        const genreTag = document.createElement('span');
+        genreTag.className = 'tag';
+        genreTag.textContent = quiz.genre;
+        tagsDiv.appendChild(genreTag);
+
+        const difficultyTag = document.createElement('span');
+        difficultyTag.className = 'tag';
+        difficultyTag.textContent = this.difficultyLabel(quiz.difficulty);
+        tagsDiv.appendChild(difficultyTag);
+
+        if (showTags && Array.isArray(quiz.tags)) {
+            quiz.tags.forEach(tag => {
+                const tagSpan = document.createElement('span');
+                tagSpan.className = 'tag';
+                tagSpan.textContent = tag;
+                tagsDiv.appendChild(tagSpan);
+            });
+        }
+
+        item.appendChild(questionDiv);
+        item.appendChild(answerDiv);
+        item.appendChild(tagsDiv);
+
+        // シングルクリックで選択、ダブルクリックで編集
+        item.addEventListener('click', () => this.selectQuizOnly(quiz.id));
+        item.addEventListener('dblclick', () => this.selectQuiz(quiz.id));
+
+        return item;
+    }
+
+    // 検索・ジャンル・難易度による絞り込み（一覧タブと並び替えタブで共用）
+    filterQuizList(quizzes, { searchText = '', genre = '', difficulty = '' }) {
+        const needle = searchText.toLowerCase();
+        return quizzes.filter(quiz => {
+            const matchSearch = !needle ||
+                String(quiz.question).toLowerCase().includes(needle) ||
+                String(quiz.answer).toLowerCase().includes(needle);
+            const matchGenre = !genre || quiz.genre === genre;
+            const matchDifficulty = !difficulty || quiz.difficulty === parseInt(difficulty);
+            return matchSearch && matchGenre && matchDifficulty;
+        });
+    }
+
     filterQuizzes() {
+        const container = document.getElementById('quizList');
+        if (!container) return;
+
         if (!this.currentCollection) {
-            document.getElementById('quizList').innerHTML = '<p style="padding:20px;">問題集を選択してください</p>';
+            container.innerHTML = '<p style="padding:20px;">問題集を選択してください</p>';
             return;
         }
 
         if (!this.isCollectionDownloaded(this.currentCollection)) {
-            const container = document.getElementById('quizList');
             container.innerHTML = `
                 <p style="padding:20px;">この問題集は未同期です。上部の「📥ダウンロード」で取得してください。</p>
                 <div style="padding:0 20px 20px;">
@@ -1394,29 +1489,18 @@ class QuizManager {
             `;
             const btn = document.getElementById('downloadCurrentCollectionBtn');
             if (btn) {
-                btn.addEventListener('click', async () => {
-                    await this.downloadCollectionIfNeeded(this.currentCollection);
-                });
+                const target = this.currentCollection;
+                btn.addEventListener('click', () => this.downloadCollectionIfNeeded(target));
             }
             return;
         }
 
-        const searchText = document.getElementById('searchBox').value.toLowerCase();
-        const genreFilter = document.getElementById('genreFilter').value;
-        const difficultyFilter = document.getElementById('difficultyFilter').value;
-
-        let quizzes = this.currentCollection.quizzes.filter(quiz => {
-            const matchSearch = !searchText ||
-                quiz.question.toLowerCase().includes(searchText) ||
-                quiz.answer.toLowerCase().includes(searchText);
-
-            const matchGenre = !genreFilter || quiz.genre === genreFilter;
-            const matchDifficulty = !difficultyFilter || quiz.difficulty === parseInt(difficultyFilter);
-
-            return matchSearch && matchGenre && matchDifficulty;
+        const quizzes = this.filterQuizList(this.currentCollection.quizzes, {
+            searchText: document.getElementById('searchBox').value,
+            genre: document.getElementById('genreFilter').value,
+            difficulty: document.getElementById('difficultyFilter').value
         });
 
-        const container = document.getElementById('quizList');
         container.innerHTML = '';
 
         if (quizzes.length === 0) {
@@ -1424,60 +1508,17 @@ class QuizManager {
             return;
         }
 
-        quizzes.forEach((quiz, index) => {
-            const item = document.createElement('div');
-            item.className = 'quiz-item';
-            item.dataset.genre = quiz.genre;
-            item.dataset.quizId = quiz.id;
-            item.dataset.quizIndex = index; // インデックスを保存
-            item.draggable = false;
-
-            if (this.currentQuiz && quiz.id === this.currentQuiz.id) {
-                item.classList.add('selected');
-            }
-
-            const questionDiv = document.createElement('div');
-            questionDiv.className = 'quiz-item-question';
-            questionDiv.textContent = this.stripFormatting(quiz.question);
-
-            const answerDiv = document.createElement('div');
-            answerDiv.className = 'quiz-item-answer';
-            answerDiv.textContent = `答: ${this.stripFormatting(quiz.answer)}`;
-
-            const tagsDiv = document.createElement('div');
-            tagsDiv.className = 'quiz-item-tags';
-
-            const genreTag = document.createElement('span');
-            genreTag.className = 'tag';
-            genreTag.textContent = quiz.genre;
-            tagsDiv.appendChild(genreTag);
-
-            const difficultyTag = document.createElement('span');
-            difficultyTag.className = 'tag';
-            difficultyTag.textContent = quiz.difficulty;
-            tagsDiv.appendChild(difficultyTag);
-
-            if (quiz.tags) {
-                quiz.tags.forEach(tag => {
-                    const tagSpan = document.createElement('span');
-                    tagSpan.className = 'tag';
-                    tagSpan.textContent = tag;
-                    tagsDiv.appendChild(tagSpan);
-                });
-            }
-
-            item.appendChild(questionDiv);
-            item.appendChild(answerDiv);
-            item.appendChild(tagsDiv);
-
-            // シングルクリックで選択、ダブルクリックで編集
-            item.addEventListener('click', () => this.selectQuizOnly(quiz.id));
-            item.addEventListener('dblclick', () => this.selectQuiz(quiz.id));
-            container.appendChild(item);
-        });
+        // 1件ずつ append すると都度レイアウトが走るため、まとめて挿入する
+        const fragment = document.createDocumentFragment();
+        quizzes.forEach(quiz => fragment.appendChild(this.buildQuizItem(quiz)));
+        container.appendChild(fragment);
     }
 
     updateGenreFilters() {
+        // ジャンルは固定なので初回だけ構築すればよい
+        if (this.genreFiltersInitialized) return;
+        this.genreFiltersInitialized = true;
+
         const genres = ['アニメ&ゲーム', 'スポーツ', '芸能', 'ライフスタイル', '社会', '文系学問', '理系学問', 'ノンジャンル'];
 
         // 管理画面のフィルター
@@ -1550,17 +1591,10 @@ class QuizManager {
             return;
         }
 
-        const searchText = document.getElementById('quizManageSearch')?.value.toLowerCase() || '';
-        const genreFilter = document.getElementById('quizManageGenreFilter')?.value || '';
-        const difficultyFilter = document.getElementById('quizManageDifficultyFilter')?.value || '';
-
-        const quizzes = this.currentCollection.quizzes.filter(quiz => {
-            const matchSearch = !searchText ||
-                quiz.question.toLowerCase().includes(searchText) ||
-                quiz.answer.toLowerCase().includes(searchText);
-            const matchGenre = !genreFilter || quiz.genre === genreFilter;
-            const matchDifficulty = !difficultyFilter || quiz.difficulty === parseInt(difficultyFilter);
-            return matchSearch && matchGenre && matchDifficulty;
+        const quizzes = this.filterQuizList(this.currentCollection.quizzes, {
+            searchText: document.getElementById('quizManageSearch')?.value || '',
+            genre: document.getElementById('quizManageGenreFilter')?.value || '',
+            difficulty: document.getElementById('quizManageDifficultyFilter')?.value || ''
         });
 
         container.innerHTML = '';
@@ -1569,37 +1603,10 @@ class QuizManager {
             return;
         }
 
+        const fragment = document.createDocumentFragment();
+
         quizzes.forEach((quiz, index) => {
-            const item = document.createElement('div');
-            item.className = 'quiz-item';
-            item.dataset.genre = quiz.genre;
-            item.dataset.quizId = quiz.id;
-            item.draggable = true;
-
-            if (this.currentQuiz && quiz.id === this.currentQuiz.id) {
-                item.classList.add('selected');
-            }
-
-            const questionDiv = document.createElement('div');
-            questionDiv.className = 'quiz-item-question';
-            questionDiv.textContent = this.stripFormatting(quiz.question);
-
-            const answerDiv = document.createElement('div');
-            answerDiv.className = 'quiz-item-answer';
-            answerDiv.textContent = `答: ${this.stripFormatting(quiz.answer)}`;
-
-            const tagsDiv = document.createElement('div');
-            tagsDiv.className = 'quiz-item-tags';
-
-            const genreTag = document.createElement('span');
-            genreTag.className = 'tag';
-            genreTag.textContent = quiz.genre;
-            tagsDiv.appendChild(genreTag);
-
-            const difficultyTag = document.createElement('span');
-            difficultyTag.className = 'tag';
-            difficultyTag.textContent = quiz.difficulty;
-            tagsDiv.appendChild(difficultyTag);
+            const item = this.buildQuizItem(quiz, { draggable: true, showTags: false });
 
             const controlsDiv = document.createElement('div');
             controlsDiv.className = 'quiz-item-controls';
@@ -1637,10 +1644,6 @@ class QuizManager {
             controlsDiv.appendChild(upBtn);
             controlsDiv.appendChild(downBtn);
             controlsDiv.appendChild(deleteBtn);
-
-            item.appendChild(questionDiv);
-            item.appendChild(answerDiv);
-            item.appendChild(tagsDiv);
             item.appendChild(controlsDiv);
 
             item.addEventListener('dragstart', (e) => this.handleDragStart(e));
@@ -1650,11 +1653,10 @@ class QuizManager {
             item.addEventListener('dragleave', (e) => this.handleDragLeave(e));
             item.addEventListener('dragend', (e) => this.handleDragEnd(e));
 
-            item.addEventListener('click', () => this.selectQuizOnly(quiz.id));
-            item.addEventListener('dblclick', () => this.selectQuiz(quiz.id));
-
-            container.appendChild(item);
+            fragment.appendChild(item);
         });
+
+        container.appendChild(fragment);
     }
 
     syncQuizSelectionState() {
@@ -1848,7 +1850,7 @@ class QuizManager {
 
         // 難易度タグ
         const difficultyTag = document.getElementById('quizDifficultyTag');
-        difficultyTag.textContent = quiz.difficulty;
+        difficultyTag.textContent = this.difficultyLabel(quiz.difficulty);
 
         // 問題文表示
         document.getElementById('questionDisplay').innerHTML = this.formatText(quiz.question);
@@ -1919,20 +1921,28 @@ class QuizManager {
 
     // ================== テキスト整形 ==================
     formatText(text) {
+        // 先にHTMLをエスケープする。
+        // 問題文はCSV/JSON取り込みやクラウド同期で外部から入りうるため、
+        // <img onerror=...> のようなタグをそのまま解釈させない。
+        let html = escapeHtml(text);
+
         // ふりがな処理: 漢字(かんじ) → <ruby>漢字<rt>かんじ</rt></ruby>
-        text = text.replace(/([一-龯々]+)\(([ぁ-んー]+)\)/g, '<ruby>$1<rt>$2</rt></ruby>');
+        html = html.replace(/([一-龯々]+)\(([ぁ-んー]+)\)/g, '<ruby>$1<rt>$2</rt></ruby>');
 
         // 色付き処理: <color>テキスト</color> → <span class="colored-text">テキスト</span>
-        text = text.replace(/<color>(.*?)<\/color>/g, '<span class="colored-text">$1</span>');
+        // エスケープ済みなので &lt;color&gt; にマッチさせる
+        html = html.replace(/&lt;color&gt;([\s\S]*?)&lt;\/color&gt;/g, '<span class="colored-text">$1</span>');
 
-        return text;
+        return html;
     }
 
     stripFormatting(text) {
         // フォーマットを削除してプレーンテキストに
-        return text
+        // （戻り値は textContent 経由でのみ使うこと）
+        if (text === null || text === undefined) return '';
+        return String(text)
             .replace(/([一-龯々]+)\(([ぁ-んー]+)\)/g, '$1')
-            .replace(/<color>(.*?)<\/color>/g, '$1');
+            .replace(/<color>([\s\S]*?)<\/color>/g, '$1');
     }
 
     // ================== ユーティリティ ==================
@@ -2160,15 +2170,14 @@ class QuizManager {
 
         // ドラッグした問題を削除
         const [draggedQuiz] = this.currentCollection.quizzes.splice(draggedIndex, 1);
-        
-        // 新しいターゲットインデックスを計算（削除によってインデックスがずれる可能性がある）
-        const newTargetIndex = draggedIndex < targetIndex ? targetIndex : targetIndex;
-        
-        // ターゲット位置に挿入
-        this.currentCollection.quizzes.splice(newTargetIndex, 0, draggedQuiz);
 
-        console.log(`🔄 問題を挿入: ${draggedIndex + 1} → ${newTargetIndex + 1}`);
-        
+        // 削除で後ろの要素が1つ前へずれるが、ここでは補正しないのが正しい。
+        // 下へ移動: ドロップ先の直後 / 上へ移動: ドロップ先の直前 に入り、
+        // どちらもドラッグしてきた向きから見て自然な位置になる。
+        this.currentCollection.quizzes.splice(targetIndex, 0, draggedQuiz);
+
+        appDebugLog(`🔄 問題を挿入: ${draggedIndex + 1} → ${targetIndex + 1}`);
+
         this.updateQuizList();
         this.updateQuizManageList();
         this.saveToLocalStorage();
@@ -2224,12 +2233,13 @@ class QuizManager {
             this.updateCollectionList();
 
             // Collection と フォルダ構成を同時に保存
-            console.log(`🔍 [DEBUG] フォルダをクラウドに保存: ${this.folders.length}個`, this.folders.map(f => f.name));
+            appDebugLog(`🔍 [DEBUG] フォルダをクラウドに保存: ${this.folders.length}個`, this.folders.map(f => f.name));
             const [syncResult] = await Promise.all([
-                window.firebaseSync.saveCollections(this.collections),
+                // クラウドの一覧を確実に把握できているときだけ、差分削除を許可する
+                window.firebaseSync.saveCollections(this.collections, { allowDeletions: this.cloudViewComplete }),
                 window.firebaseSync.saveFolders(this.folders)
             ]);
-            console.log('🔍 [DEBUG] フォルダ保存完了');
+            appDebugLog('🔍 [DEBUG] フォルダ保存完了');
 
             const uploadedCount = syncResult?.uploadedCount || 0;
             const skippedCount = syncResult?.skippedCount || 0;
@@ -2258,26 +2268,17 @@ class QuizManager {
             });
             this.updateCollectionList();
             this.setLastSync('失敗', err.message || '保存エラー');
-            this.showNotification(`<strong>⚠️ クラウド保存に失敗</strong><br><small>${err.message}</small>`, 'error');
+            this.showNotification(`<strong>⚠️ クラウド保存に失敗</strong><br><small>${escapeHtml(err.message)}</small>`, 'error');
         }
-    }
-
-    async downloadFromCloud() {
-        if (!this.syncEnabled || !window.firebaseSync) {
-            alert('クラウド同期が有効になっていません');
-            return;
-        }
-
-        if (this.lastSelectionSource === 'collection' && this.currentCollection) {
-            this.downloadCurrentCollectionFromCloud();
-            return;
-        }
-
-        await this.downloadCurrentFolderFromCloud();
     }
 
     // ================== データ保存・読み込み ==================
 
+    /**
+     * 画面右上に通知を表示する。
+     * @param {string} message HTMLとして解釈される。外部由来の文字列を含める場合は
+     *                         必ず escapeHtml() を通してから渡すこと。
+     */
     showNotification(message, type = 'success') {
         const notification = document.createElement('div');
         notification.className = 'copy-notification';
@@ -2317,17 +2318,19 @@ class QuizManager {
             };
             
             const jsonData = JSON.stringify(data);
-            const dataSize = new Blob([jsonData]).size;
+            // localStorage の使用量は UTF-16 の符号単位で数えられるため length * 2 バイトで見積もる。
+            // （Blob を作るとデータ全体をもう一度コピーすることになり、保存のたびに無駄が出る）
+            const dataSize = jsonData.length * 2;
             const dataSizeMB = (dataSize / 1024 / 1024).toFixed(2);
-            
+
             // LocalStorageの容量チェック（通常5-10MBが上限）
             if (dataSize > 4.5 * 1024 * 1024) {
                 console.warn(`⚠️ データサイズが大きいです: ${dataSizeMB}MB`);
                 console.warn('問題集が多すぎる場合、一部を別ファイルに保存することを推奨します');
             }
-            
+
             localStorage.setItem('quizManagerData', jsonData);
-            console.log(`✅ ローカルストレージに保存成功 (${dataSizeMB}MB, ${this.collections.length}問題集, ${this.collections.reduce((sum, c) => sum + this.getCollectionQuizCount(c), 0)}問)`);
+            appDebugLog(`✅ ローカルストレージに保存成功 (${dataSizeMB}MB, ${this.collections.length}問題集)`);
 
             // Firestore同期は即時ではなく遅延実行
             this.scheduleCloudUpload();
@@ -2371,7 +2374,11 @@ class QuizManager {
                             console.warn(`⚠️ 問題集「${col.name}」のデータが不正です。修復します。`);
                             col.quizzes = [];
                         }
-                        col.quizCount = col.quizzes.length;
+                        // 未ダウンロードの問題集は quizzes が空配列なので、
+                        // ここで上書きするとクラウド由来の問題数が 0 に潰れてしまう
+                        if (col.isDownloaded !== false) {
+                            col.quizCount = col.quizzes.length;
+                        }
                         if (typeof col.isDownloaded !== 'boolean') col.isDownloaded = true;
                         if (typeof col.isCloudPlaceholder !== 'boolean') col.isCloudPlaceholder = false;
                         if (!col.downloadedUpdateId && col.isDownloaded) {
@@ -2629,6 +2636,7 @@ class QuizManager {
             this.showSyncOverlay('☁️ クラウドに接続中...', 'データを確認しています');
             let metas = [];
             let cloudFolders = null;
+            let metaLoadFailed = false;
             try {
                 // 問題集メタデータとフォルダ情報を同時に取得
                 const [metasResult, foldersResult] = await Promise.all([
@@ -2649,9 +2657,22 @@ class QuizManager {
                 console.warn('⚠️ クラウドメタデータ取得に失敗（ローカル継続）:', metaError);
                 metas = [];
                 cloudFolders = null;
+                metaLoadFailed = true;
             } finally {
                 this.hideSyncOverlay();
             }
+
+            if (metaLoadFailed) {
+                // クラウドの状態が分からないまま「クラウドは空」とみなして上書きすると、
+                // クラウド側のデータを壊しかねないため何もしない
+                this.updateSyncUI();
+                this.showNotification(
+                    '<strong>⚠️ クラウドの一覧を取得できませんでした</strong><br><small>同期はONにしましたが、アップロードは次回の保存時に行います</small>',
+                    'warning'
+                );
+                return;
+            }
+
             if (metas && metas.length > 0) {
                 const useFirestore = confirm(
                     '☁️ クラウドにデータが見つかりました\n\n' +
@@ -2663,8 +2684,9 @@ class QuizManager {
 
                 if (useFirestore) {
                     this.isLoadingFromFirestore = true;
-                    this.collections = this.buildCollectionsFromCloudMetas(metas);
-                    
+                    this.collections = this.mergeCollectionsWithCloudMetas(metas);
+                    this.cloudViewComplete = true;
+
                     // クラウドからフォルダ情報を読み込む
                     if (cloudFolders && Array.isArray(cloudFolders.folders)) {
                         console.log(`📁 クラウドからフォルダ情報を読み込み: ${cloudFolders.folders.length}個`);
@@ -2681,8 +2703,10 @@ class QuizManager {
                 }
             } else {
                 // クラウドにデータがない場合、現在のデータをアップロード
+                // （ここまで来ていればクラウドの状態は取得できているので、以降の差分同期で削除を許可してよい）
+                this.cloudViewComplete = true;
                 await Promise.all([
-                    window.firebaseSync.saveCollections(this.collections),
+                    window.firebaseSync.saveCollections(this.collections, { allowDeletions: true }),
                     window.firebaseSync.saveFolders(this.folders)
                 ]);
             }
@@ -2825,7 +2849,6 @@ class QuizManager {
             msgEl.textContent = message || 'クラウドと同期中...';
             detailEl.textContent = detail || '';
             overlay.style.display = 'flex';
-            this._syncOverlayStart = Date.now();
         }
     }
 
@@ -2889,15 +2912,16 @@ class QuizManager {
                 this.updateSyncOverlay('✅ 問題集一覧を反映中...', `${metas.length} 問題集・${totalQuizzes} 問`);
 
                 this.isLoadingFromFirestore = true;
-                this.collections = this.buildCollectionsFromCloudMetas(metas);
-                
+                this.collections = this.mergeCollectionsWithCloudMetas(metas);
+                this.cloudViewComplete = true;
+
                 // クラウドからフォルダ情報を読み込む
                 if (cloudFolders && Array.isArray(cloudFolders.folders)) {
                     console.log(`📁 クラウドからフォルダ情報を読み込み: ${cloudFolders.folders.length}個`);
                     this.folders = cloudFolders.folders;
                     this.ensureDefaultFolder();
                 }
-                
+
                 if (this.collections.length > 0) {
                     this.currentCollection = this.collections[0];
                 }
@@ -2905,6 +2929,9 @@ class QuizManager {
                 this.saveToLocalStorage();
                 this.isLoadingFromFirestore = false;
                 console.log('✅ 起動時にクラウドの問題集一覧を読み込みました（本文はオンデマンド）');
+            } else {
+                // クラウドが空だと確認できた場合もローカルが完全な状態
+                this.cloudViewComplete = true;
             }
 
             this.updateSyncUI();
@@ -3113,33 +3140,6 @@ class QuizManager {
         return records;
     }
 
-    parseCsvLine(line) {
-        const result = [];
-        let current = '';
-        let inQuotes = false;
-
-        for (let i = 0; i < line.length; i++) {
-            const char = line[i];
-
-            if (char === '"') {
-                if (inQuotes && line[i + 1] === '"') {
-                    current += '"';
-                    i++;
-                } else {
-                    inQuotes = !inQuotes;
-                }
-            } else if (char === ',' && !inQuotes) {
-                result.push(current.trim());
-                current = '';
-            } else {
-                current += char;
-            }
-        }
-
-        result.push(current.trim());
-        return result;
-    }
-
     parseDifficulty(text) {
         if (!text) return 5;
         text = text.trim();
@@ -3158,6 +3158,9 @@ class QuizManager {
     }
 
     // ================== 設定 ==================
+    // 表示への反映のみを行う。保存は呼び出し側で行うこと。
+    // （スライダーの input イベントごとに保存すると、全問題集のシリアライズが
+    //   ドラッグ中に何十回も走って固まるため）
     applySettings() {
         document.documentElement.style.setProperty('--base-font-size', `${this.settings.fontSize}px`);
         document.getElementById('fontSizeValue').textContent = this.settings.fontSize;
@@ -3167,8 +3170,6 @@ class QuizManager {
         if (questionDisplay) {
             questionDisplay.style.fontSize = `${this.settings.quizFontSize}px`;
         }
-
-        this.saveToLocalStorage();
     }
 
     // ================== 問題集フォルダ移動タブ ==================
@@ -3180,10 +3181,23 @@ class QuizManager {
         const prevSource = this._collectionMoveState.sourceFolderId || '';
         const prevDest = this._collectionMoveState.destFolderId || '';
 
-        const options = '<option value="">フォルダを選択...</option>' +
-            this.folders.map(f => `<option value="${f.id}">${f.name}</option>`).join('');
-        sourceSel.innerHTML = options;
-        destSel.innerHTML = options;
+        // フォルダ名を文字列連結でHTMLに埋め込むと属性を脱出されうるため要素を組み立てる
+        const fillOptions = (select) => {
+            select.innerHTML = '';
+            const placeholder = document.createElement('option');
+            placeholder.value = '';
+            placeholder.textContent = 'フォルダを選択...';
+            select.appendChild(placeholder);
+
+            this.folders.forEach(folder => {
+                const option = document.createElement('option');
+                option.value = folder.id;
+                option.textContent = folder.name;
+                select.appendChild(option);
+            });
+        };
+        fillOptions(sourceSel);
+        fillOptions(destSel);
 
         if (prevSource) sourceSel.value = prevSource;
         if (prevDest) destSel.value = prevDest;
@@ -3372,8 +3386,20 @@ class QuizManager {
         quizzes.forEach((quiz, idx) => {
             const item = document.createElement('div');
             item.className = 'quiz-item' + (selected.has(quiz.id) ? ' selected' : '');
-            item.innerHTML = `<div class="quiz-question">${quiz.question.substring(0, 60)}${quiz.question.length > 60 ? '…' : ''}</div>
-                <div class="quiz-answer" style="font-size:12px;color:#666;">→ ${quiz.answer}</div>`;
+
+            // innerHTML に問題文を埋め込むとHTMLとして解釈されるため textContent で組み立てる
+            const questionDiv = document.createElement('div');
+            questionDiv.className = 'quiz-question';
+            const questionText = this.stripFormatting(quiz.question);
+            questionDiv.textContent = questionText.substring(0, 60) + (questionText.length > 60 ? '…' : '');
+
+            const answerDiv = document.createElement('div');
+            answerDiv.className = 'quiz-answer';
+            answerDiv.style.cssText = 'font-size:12px;color:#666;';
+            answerDiv.textContent = `→ ${this.stripFormatting(quiz.answer)}`;
+
+            item.appendChild(questionDiv);
+            item.appendChild(answerDiv);
 
             item.addEventListener('click', (e) => {
                 if (e.shiftKey && lastClickedIndex !== null) {
@@ -3397,57 +3423,59 @@ class QuizManager {
         });
     }
 
+    // 問題の一意なIDを生成する
+    generateQuizId() {
+        return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
+    }
+
     moveQuizzes(fromSide, toSide) {
+        this.transferQuizzes(fromSide, toSide, 'move');
+    }
+
+    copyQuizzes(fromSide, toSide) {
+        this.transferQuizzes(fromSide, toSide, 'copy');
+    }
+
+    /**
+     * 問題移動タブでの移動／コピーを行う。
+     * @param {'move'|'copy'} mode
+     */
+    transferQuizzes(fromSide, toSide, mode) {
+        const isMove = mode === 'move';
+        const label = isMove ? '移動' : 'コピー';
+
         const fromId = fromSide === 'source' ? this._moveState.sourceId : this._moveState.destId;
         const toId = toSide === 'source' ? this._moveState.sourceId : this._moveState.destId;
         const fromSelected = fromSide === 'source' ? this._moveState.sourceSelected : this._moveState.destSelected;
 
-        if (!fromId || !toId) { alert('移動元と移動先の問題集を選択してください'); return; }
-        if (fromId === toId) { alert('移動元と移動先が同じ問題集です'); return; }
-        if (fromSelected.size === 0) { alert('移動する問題を選択してください'); return; }
+        if (!fromId || !toId) { alert(`${label}元と${label}先の問題集を選択してください`); return; }
+        if (fromId === toId) { alert(`${label}元と${label}先が同じ問題集です`); return; }
+        if (fromSelected.size === 0) { alert(`${label}する問題を選択してください`); return; }
 
         const fromCol = this.collections.find(c => c.id === fromId);
         const toCol = this.collections.find(c => c.id === toId);
+        if (!fromCol || !toCol) { alert('問題集が見つかりません'); return; }
 
-        const toMove = fromCol.quizzes.filter(q => fromSelected.has(q.id));
-        if (!this.canAddQuizzesToCollection(toCol, toMove.length)) return;
-        if (!this.canAddQuizzesToFolder(toCol.folder || this.defaultFolderName, toMove.length)) return;
-        toMove.forEach(q => {
-            toCol.quizzes.push({ ...q, id: Date.now().toString() + Math.random().toString(36).substr(2, 5) });
+        const targets = fromCol.quizzes.filter(q => fromSelected.has(q.id));
+        if (targets.length === 0) { alert(`${label}する問題を選択してください`); return; }
+
+        if (!this.canAddQuizzesToCollection(toCol, targets.length)) return;
+        if (!this.canAddQuizzesToFolder(toCol.folder || this.defaultFolderName, targets.length)) return;
+
+        targets.forEach(quiz => {
+            toCol.quizzes.push({ ...quiz, id: this.generateQuizId() });
         });
-        fromCol.quizzes = fromCol.quizzes.filter(q => !fromSelected.has(q.id));
+
+        if (isMove) {
+            fromCol.quizzes = fromCol.quizzes.filter(q => !fromSelected.has(q.id));
+            fromCol.quizCount = fromCol.quizzes.length;
+        }
         toCol.quizCount = toCol.quizzes.length;
-        fromCol.quizCount = fromCol.quizzes.length;
         fromSelected.clear();
 
         this.saveToLocalStorage();
         this.updateMoveCollectionSelects();
-        console.log(`✅ ${toMove.length}問を「${fromCol.name}」→「${toCol.name}」へ移動`);
-    }
-
-    copyQuizzes(fromSide, toSide) {
-        const fromId = fromSide === 'source' ? this._moveState.sourceId : this._moveState.destId;
-        const toId = toSide === 'source' ? this._moveState.sourceId : this._moveState.destId;
-        const fromSelected = fromSide === 'source' ? this._moveState.sourceSelected : this._moveState.destSelected;
-
-        if (!fromId || !toId) { alert('コピー元とコピー先の問題集を選択してください'); return; }
-        if (fromId === toId) { alert('コピー元とコピー先が同じ問題集です'); return; }
-        if (fromSelected.size === 0) { alert('コピーする問題を選択してください'); return; }
-
-        const fromCol = this.collections.find(c => c.id === fromId);
-        const toCol = this.collections.find(c => c.id === toId);
-
-        const toCopy = fromCol.quizzes.filter(q => fromSelected.has(q.id));
-        if (!this.canAddQuizzesToCollection(toCol, toCopy.length)) return;
-        if (!this.canAddQuizzesToFolder(toCol.folder || this.defaultFolderName, toCopy.length)) return;
-        toCopy.forEach(q => {
-            toCol.quizzes.push({ ...q, id: Date.now().toString() + Math.random().toString(36).substr(2, 5) });
-        });
-        toCol.quizCount = toCol.quizzes.length;
-
-        this.saveToLocalStorage();
-        this.updateMoveCollectionSelects();
-        console.log(`✅ ${toCopy.length}問を「${fromCol.name}」→「${toCol.name}」へコピー`);
+        console.log(`✅ ${targets.length}問を「${fromCol.name}」→「${toCol.name}」へ${label}`);
     }
 
     applyViewMode() {
@@ -3457,7 +3485,7 @@ class QuizManager {
         // 非表示にするボタン（編集・保存系）
         const hideIds = [
             'saveBtn', 'importCsvBtn',
-            'newFolderBtn', 'downloadFolderBtn', 'moveCollectionFolderBtn',
+            'newFolderBtn', 'downloadFolderBtn',
             'newCollectionBtn',
             'newQuizBtn', 'deleteQuizBtn',
             'clearDataBtn'
@@ -3487,12 +3515,42 @@ class QuizManager {
         console.log('👁 閲覧モードで起動しました（localStorageへの読み書き無効）');
     }
 
-    clearAllData() {
+    async clearAllData() {
         if (!confirm('全てのデータを削除しますか？この操作は元に戻せません。')) return;
         if (!confirm('本当によろしいですか？')) return;
 
         const collectionCount = this.collections.length;
         const totalQuizzes = this.collections.reduce((sum, c) => sum + (c.quizzes?.length || 0), 0);
+
+        // クラウド同期中の場合、クラウド側をどうするかを明示的に確認する。
+        // （確認せずにローカルだけ空にすると、その後の自動アップロードでクラウドまで
+        //   消えてしまう事故につながるため）
+        let clearCloud = false;
+        if (this.syncEnabled && window.firebaseSync) {
+            clearCloud = confirm(
+                '☁️ クラウド上のデータも削除しますか？\n\n' +
+                '【OK】= クラウドのデータも削除する\n' +
+                '【キャンセル】= この端末のデータだけ削除し、クラウドには残す'
+            );
+        }
+
+        if (clearCloud) {
+            this.showSyncOverlay('🗑️ クラウドのデータを削除中...', '');
+            try {
+                await window.firebaseSync.deleteAllCollections();
+                await window.firebaseSync.saveFolders([]);
+                this.cloudViewComplete = true;
+            } catch (error) {
+                this.hideSyncOverlay();
+                alert('クラウドのデータ削除に失敗しました: ' + error.message);
+                return;
+            }
+            this.hideSyncOverlay();
+        } else if (this.syncEnabled) {
+            // ローカルとクラウドの内容が食い違う状態になるため、
+            // 以降の自動同期でクラウド側を削除しないようにする
+            this.cloudViewComplete = false;
+        }
 
         this.collections = [];
         this.folders = [
@@ -3543,21 +3601,10 @@ ${answer}
 
         // クリップボードにコピー
         navigator.clipboard.writeText(prompt).then(() => {
-            const notification = document.createElement('div');
-            notification.className = 'copy-notification';
-            notification.innerHTML = `
-                <div style="background: #4CAF50; color: white; padding: 15px 20px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); max-width: 400px;">
-                    <strong>📋 質問をコピーしました！</strong><br>
-                    <small>Claude.aiが開くので、Ctrl+V で貼り付けてください</small>
-                </div>
-            `;
-            notification.style.cssText = 'position: fixed; top: 20px; right: 20px; z-index: 10000; animation: slideIn 0.3s;';
-            document.body.appendChild(notification);
-
-            setTimeout(() => {
-                notification.style.animation = 'slideOut 0.3s';
-                setTimeout(() => notification.remove(), 300);
-            }, 3000);
+            this.showNotification(
+                '<strong>📋 質問をコピーしました！</strong><br><small>Claude.aiが開くので、Ctrl+V で貼り付けてください</small>',
+                'success'
+            );
 
             // Claude.aiを開く
             window.open('https://claude.ai/new', '_blank');
