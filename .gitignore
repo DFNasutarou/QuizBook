@@ -45,3 +45,6 @@ desktop.ini
 
 # Workspace settings
 *.code-workspace.backup
+
+# PDF取り込み作業用（元PDFは他者の著作物を含むためコミットしない）
+pdf/
