@@ -245,14 +245,15 @@ def convert(path, args):
             total += len(records)
             continue
 
-        base = args.out or path.stem
-        if len(sheets) > 1:
-            base = f'{base}_{re.sub(r"[\\\\/:*?<>|]", "", name)[:24]}'
+        # 元ファイル1つにつき1フォルダ。複数シートはその中でファイル名を分ける
+        folder = args.out or path.stem
+        base = folder if len(sheets) == 1 else f'{folder}_{name[:24]}'
         deduped, duplicated = dedupe({section or 'all': records})
         if duplicated:
             print(f'    （{name}: 重複 {duplicated}）')
-        for fname, n in write_collections(deduped, out_dir, base, args.limit):
-            print(f'✓ {fname:<44}{n:>5}問')
+        for fname, n in write_collections(deduped, out_dir, base, args.limit,
+                                          folder_name=folder):
+            print(f'✓ {fname:<50}{n:>5}問')
         total += len(records)
     return total
 

@@ -56,7 +56,8 @@ def inspect(path):
         else:
             seen[q] = i
         if reasons:
-            issues.append([path.name, i, ' / '.join(reasons), q[:120], a[:60]])
+            issues.append([f'{path.parent.name}/{path.name}', i,
+                           ' / '.join(reasons), q[:120], a[:60]])
     return issues, len(body)
 
 
@@ -72,7 +73,8 @@ def main():
         sys.exit(f'見つかりません: {target}')
 
     if target.is_dir():
-        files = [f for f in sorted(target.glob('*.csv')) if not f.name.startswith('_')]
+        # 元ファイルごとのサブフォルダに入っているので再帰的に探す
+        files = [f for f in sorted(target.rglob('*.csv')) if not f.name.startswith('_')]
         report = Path(args.out) if args.out else target / '_要確認リスト.csv'
     else:
         files = [target]
@@ -86,7 +88,8 @@ def main():
         total += n
         all_issues.extend(issues)
         flag = '' if not issues else f'{len(issues) / n * 100:.0f}%'
-        print(f'{path.name[:38]:<40}{n:>6}{len(issues):>7} {flag}')
+        label = f'{path.parent.name}/{path.name}' if path.parent != target else path.name
+        print(f'{label[:44]:<46}{n:>6}{len(issues):>7} {flag}')
 
     with open(report, 'w', encoding='utf-8-sig', newline='') as f:
         w = csv.writer(f, quoting=csv.QUOTE_ALL)

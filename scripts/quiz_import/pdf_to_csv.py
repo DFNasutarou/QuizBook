@@ -668,7 +668,7 @@ def convert(path, args):
     out_dir = Path(args.outdir) if args.outdir else path.parent.parent / 'csv'
     written = write_collections(by_section, out_dir, args.out or path.stem, args.limit)
     for name, n in written:
-        print(f'✓ {name:<44}{n:>5}問')
+        print(f'✓ {name:<50}{n:>5}問')
     note = []
     if dropped:
         note.append(f'除外 {dropped}')
