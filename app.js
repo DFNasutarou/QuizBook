@@ -3079,28 +3079,67 @@ class QuizManager {
         event.target.value = '';
     }
 
-    importCsvFolder() {
-        document.getElementById('csvFolderInput').click();
+    /**
+     * フォルダ選択を開く。
+     * Chrome/Edge のフォルダ選択API（showDirectoryPicker）を優先し、
+     * 使えない場合は input[webkitdirectory] に切り替える。
+     */
+    async importCsvFolder() {
+        console.log('📂 フォルダ読込を開始します');
+
+        if (typeof window.showDirectoryPicker === 'function') {
+            try {
+                const dir = await window.showDirectoryPicker({ mode: 'read' });
+                const files = [];
+                for await (const entry of dir.values()) {
+                    if (entry.kind === 'file'
+                        && entry.name.toLowerCase().endsWith('.csv')
+                        && !entry.name.startsWith('_')) {
+                        files.push(await entry.getFile());
+                    }
+                }
+                await this.importCsvFiles(dir.name, files);
+                return;
+            } catch (error) {
+                if (error && (error.name === 'AbortError' || error.name === 'NotAllowedError')) {
+                    console.log('📂 フォルダ選択がキャンセルされました');
+                    return;
+                }
+                console.warn('⚠️ フォルダ選択APIが使えませんでした。別方式で開きます:', error);
+            }
+        }
+
+        const input = document.getElementById('csvFolderInput');
+        if (!input) {
+            alert('フォルダ読込を開けませんでした（画面を再読み込みしてください）');
+            return;
+        }
+        input.click();
+    }
+
+    handleCsvFolderImport(event) {
+        const files = Array.from(event.target.files || []);
+        event.target.value = '';
+
+        // webkitRelativePath は「フォルダ名/ファイル名」の形になる
+        const relative = (files[0] && files[0].webkitRelativePath) || '';
+        const folderName = relative.split('/')[0] || 'インポート';
+
+        return this.importCsvFiles(folderName, files.filter(
+            f => f.name.toLowerCase().endsWith('.csv') && !f.name.startsWith('_')
+        ));
     }
 
     /**
-     * フォルダを丸ごと取り込む。
-     * 選んだフォルダと同じ名前のフォルダを作り、その中のCSV1つを問題集1つとして入れる。
+     * CSVの集まりを1つのフォルダとして取り込む。
+     * 選んだフォルダと同じ名前のフォルダを作り、CSV1つを問題集1つとして入れる。
      * （変換スクリプトが元の問題集1つにつき1フォルダを作るので、それをそのまま取り込める）
      */
-    async handleCsvFolderImport(event) {
-        const files = Array.from(event.target.files || [])
-            .filter(f => f.name.toLowerCase().endsWith('.csv') && !f.name.startsWith('_'));
-        event.target.value = '';
-
-        if (files.length === 0) {
+    async importCsvFiles(folderName, files) {
+        if (!files || files.length === 0) {
             alert('CSVファイルが見つかりませんでした');
             return;
         }
-
-        // webkitRelativePath は「フォルダ名/ファイル名」の形になる
-        const relative = files[0].webkitRelativePath || '';
-        const folderName = relative.split('/')[0] || 'インポート';
 
         if (!confirm(
             `フォルダ「${folderName}」から ${files.length} 件のCSVを取り込みます。\n\n` +
