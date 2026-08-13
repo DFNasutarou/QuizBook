@@ -54,6 +54,9 @@ QUESTION_END_RE = re.compile(
     r'(?:[？?]|でしょう[かうっ]?|ですか|は何|は誰|はどこ|という|どれ|まで|'
     r'答えなさい|お答えください)[\s。]*$'
 )
+# 答えの末尾に付く判定や注記（記録集でよくある）
+JUDGE_TAIL_RE = re.compile(r'[\[【][^\[\]【】]{0,40}[\]】]\s*$')
+
 # 答えが助詞や拗音で始まる = 問題文の末尾が答え側へこぼれた形
 BLEED_RE = re.compile(r'^[ょゃゅっーぁぃぅぇぉをにはがのでともへや、。」』）]')
 
@@ -436,10 +439,14 @@ def extract(doc, cfg, pages=None):
                 if kind:
                     section = kind
 
-        # 答えの列が無いページ（問題だけを並べた読み上げ用ページなど）は飛ばす
-        if cfg.get('require_answer_column'):
-            if sum(1 for it in items if it['x0'] >= cfg['x_split']) < 3:
-                continue
+        # 答えの列が空のページ（問題だけを全幅に流し込んだ読み上げ用ページなど）は飛ばす。
+        # そういうページを列で切ると、問題文の途中が答え側へ流れてしまう。
+        # 答えの列があると分かっている文書に限り、自動で判定する。
+        skip_empty_answer = cfg.get('require_answer_column') or (
+            cfg.get('answer_x0') is not None and not cfg.get('keep_all_pages')
+        )
+        if skip_empty_answer and sum(1 for it in items if it['x0'] >= cfg['x_split']) < 3:
+            continue
 
         threshold = bsize * cfg.get('small_ratio', 0.8)
         bases = [it for it in items if it['size'] >= threshold]
@@ -565,6 +572,16 @@ def to_rows(records, cfg):
     for r in records:
         q = strip_heading(r['q'])
         a = strip_heading(r['a'])
+        memo = r['m']
+
+        # 答えの末尾に付く判定や注記（[飼い主○]【スルー】など）はメモへ回す
+        while True:
+            m = JUDGE_TAIL_RE.search(a)
+            if not m or not a[:m.start()].strip():
+                break
+            memo = f'{m.group(0)} {memo}'.strip()
+            a = a[:m.start()].strip()
+
         if len(q) < min_len or not a:
             dropped += 1
             continue
@@ -572,7 +589,7 @@ def to_rows(records, cfg):
             dropped += 1
             continue
         by_section.setdefault(r['section'], []).append(
-            [q, a, r['m'], DEFAULT_GENRE, DEFAULT_DIFFICULTY,
+            [q, a, memo, DEFAULT_GENRE, DEFAULT_DIFFICULTY,
              f"{tag}, {r['section']}" if tag else r['section']])
     return by_section, dropped
 
@@ -612,6 +629,8 @@ def build_config(doc, args):
         layout['answer_stop_re'] = args.answer_stop
     if args.require_answer_column:
         layout['require_answer_column'] = True
+    if args.keep_all_pages:
+        layout['keep_all_pages'] = True
     if args.require_question_end:
         layout['require_question_end'] = True
 
@@ -710,6 +729,8 @@ def main():
                    help='疑問の形で終わらない問題を捨てる（既定: 取りこぼしが多いと自動で有効）')
     g.add_argument('--keep-all', action='store_true',
                    help='疑問の形で終わらないものも残す（自動有効化をやめる）')
+    g.add_argument('--keep-all-pages', action='store_true',
+                   help='答えの列が無いページも読む（既定: 自動で飛ばす）')
 
     args = p.parse_args()
     target = Path(args.input)

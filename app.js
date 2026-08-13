@@ -3136,16 +3136,12 @@ class QuizManager {
      * （変換スクリプトが元の問題集1つにつき1フォルダを作るので、それをそのまま取り込める）
      */
     async importCsvFiles(folderName, files) {
+        // 取り込み前後の確認ダイアログは出さない。
+        // 間違えたときはフォルダごと削除すればよいので、そのまま進める。
         if (!files || files.length === 0) {
-            alert('CSVファイルが見つかりませんでした');
+            this.showNotification('<strong>⚠️ CSVが見つかりませんでした</strong>', 'warning');
             return;
         }
-
-        if (!confirm(
-            `フォルダ「${folderName}」から ${files.length} 件のCSVを取り込みます。\n\n` +
-            `・フォルダ「${folderName}」を作成します\n` +
-            `・CSV 1つにつき問題集を1つ作ります`
-        )) return;
 
         let folder = this.folders.find(f => f.name === folderName);
         if (!folder) {
@@ -3217,13 +3213,20 @@ class QuizManager {
         this.saveToLocalStorage();
 
         const quizTotal = this.getFolderUsage(folder.name).quizCount;
-        console.log(`📂 フォルダ「${folderName}」から ${added.length} 問題集を取り込みました`);
+        console.log(`📂 フォルダ「${folderName}」から ${added.length}問題集・${quizTotal}問を取り込みました`);
+        added.forEach(line => console.log(`    ${line}`));
+        if (skipped.length) {
+            console.warn(`⚠️ 取り込めなかったCSV (${skipped.length}件):`);
+            skipped.forEach(line => console.warn(`    ${line}`));
+        }
 
-        alert(
-            `フォルダ「${folderName}」を取り込みました\n\n` +
-            `問題集: ${added.length}件（フォルダ合計 ${quizTotal}問）\n` +
-            (added.length ? `\n${added.join('\n')}\n` : '') +
-            (skipped.length ? `\n取り込めなかったもの:\n${skipped.join('\n')}` : '')
+        // ダイアログではなく画面右上の通知で知らせる（続けて取り込むときに邪魔にならない）
+        const detail = skipped.length
+            ? `<small>${added.length}問題集 / ${quizTotal}問<br>${skipped.length}件は取り込めませんでした（詳細はコンソール）</small>`
+            : `<small>${added.length}問題集 / ${quizTotal}問</small>`;
+        this.showNotification(
+            `<strong>📂 ${escapeHtml(folderName)}</strong><br>${detail}`,
+            skipped.length ? 'warning' : 'success'
         );
     }
 
