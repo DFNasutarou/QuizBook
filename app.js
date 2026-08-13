@@ -3034,20 +3034,26 @@ class QuizManager {
                 const selectedFolder = this.getFolderById(this.selectedFolderId);
                 const folderName = selectedFolder ? selectedFolder.name : this.defaultFolderName;
 
+                // 上限チェックは「空の問題集に quizzes.length 問を足す」形で行う。
+                // 先に quizzes を入れてから判定すると問題数を二重に数えてしまい、
+                // 上限ちょうどのCSV（500問）が取り込めなくなる。
                 const collection = {
                     id: Date.now().toString(),
                     name: collectionName,
-                    quizzes: quizzes,
+                    quizzes: [],
                     created_at: new Date().toISOString(),
                     folder: folderName,
                     isCloudPlaceholder: false,
                     isDownloaded: true,
-                    quizCount: quizzes.length
+                    quizCount: 0
                 };
 
                 if (!this.canAddCollectionToFolder(folderName)) return;
                 if (!this.canAddQuizzesToCollection(collection, quizzes.length)) return;
                 if (!this.canAddQuizzesToFolder(folderName, quizzes.length)) return;
+
+                collection.quizzes = quizzes;
+                collection.quizCount = quizzes.length;
 
                 this.collections.push(collection);
                 this.currentCollection = collection;
