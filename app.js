@@ -686,6 +686,7 @@ class QuizManager {
         // ファイル入力
         document.getElementById('fileInput').addEventListener('change', (e) => this.handleFileLoad(e));
         document.getElementById('csvFileInput').addEventListener('change', (e) => this.handleCsvImport(e));
+        document.getElementById('csvFolderInput').addEventListener('change', (e) => this.handleCsvFolderImport(e));
 
         // 問題移動タブ
         document.getElementById('moveSourceCollection').addEventListener('change', (e) => this.onMoveCollectionChange('source', e.target.value));
@@ -2994,6 +2995,32 @@ class QuizManager {
         document.getElementById('csvFileInput').click();
     }
 
+    /**
+     * CSVのテキストを問題の配列に変換する（1件読み込みとフォルダ読み込みで共用）
+     * 形式: 問題文,答え,メモ,ジャンル,難易度,タグ（1行目は見出し）
+     */
+    csvTextToQuizzes(csvText) {
+        const records = this.parseCsv(csvText.replace(/^﻿/, ''));
+        const quizzes = [];
+
+        for (let i = 1; i < records.length; i++) {
+            const parts = records[i];
+            if (parts.length >= 2 && parts[0]) {
+                quizzes.push({
+                    id: this.generateQuizId(),
+                    question: parts[0] || '',
+                    answer: parts[1] || '',
+                    memo: parts[2] || '',
+                    genre: parts[3] || 'ノンジャンル',
+                    difficulty: this.parseDifficulty(parts[4]) || 5,
+                    tags: parts[5] ? parts[5].split(',').map(t => t.trim()).filter(t => t) : [],
+                    created_at: new Date().toISOString()
+                });
+            }
+        }
+        return quizzes;
+    }
+
     handleCsvImport(event) {
         const file = event.target.files[0];
         if (!file) return;
@@ -3001,27 +3028,7 @@ class QuizManager {
         const reader = new FileReader();
         reader.onload = (e) => {
             try {
-                const csv = e.target.result;
-                const records = this.parseCsv(csv);
-
-                // ヘッダーをスキップ
-                const quizzes = [];
-                for (let i = 1; i < records.length; i++) {
-                    const parts = records[i];
-                    if (parts.length >= 2 && parts[0]) {
-                        const quiz = {
-                            id: Date.now().toString() + i,
-                            question: parts[0] || '',
-                            answer: parts[1] || '',
-                            memo: parts[2] || '',
-                            genre: parts[3] || 'ノンジャンル',
-                            difficulty: this.parseDifficulty(parts[4]) || 5,
-                            tags: parts[5] ? parts[5].split(',').map(t => t.trim()).filter(t => t) : [],
-                            created_at: new Date().toISOString()
-                        };
-                        quizzes.push(quiz);
-                    }
-                }
+                const quizzes = this.csvTextToQuizzes(e.target.result);
 
                 if (quizzes.length === 0) {
                     alert('有効な問題が見つかりませんでした');
@@ -3067,6 +3074,115 @@ class QuizManager {
         };
         reader.readAsText(file, 'UTF-8');
         event.target.value = '';
+    }
+
+    importCsvFolder() {
+        document.getElementById('csvFolderInput').click();
+    }
+
+    /**
+     * フォルダを丸ごと取り込む。
+     * 選んだフォルダと同じ名前のフォルダを作り、その中のCSV1つを問題集1つとして入れる。
+     * （変換スクリプトが元の問題集1つにつき1フォルダを作るので、それをそのまま取り込める）
+     */
+    async handleCsvFolderImport(event) {
+        const files = Array.from(event.target.files || [])
+            .filter(f => f.name.toLowerCase().endsWith('.csv') && !f.name.startsWith('_'));
+        event.target.value = '';
+
+        if (files.length === 0) {
+            alert('CSVファイルが見つかりませんでした');
+            return;
+        }
+
+        // webkitRelativePath は「フォルダ名/ファイル名」の形になる
+        const relative = files[0].webkitRelativePath || '';
+        const folderName = relative.split('/')[0] || 'インポート';
+
+        if (!confirm(
+            `フォルダ「${folderName}」から ${files.length} 件のCSVを取り込みます。\n\n` +
+            `・フォルダ「${folderName}」を作成します\n` +
+            `・CSV 1つにつき問題集を1つ作ります`
+        )) return;
+
+        let folder = this.folders.find(f => f.name === folderName);
+        if (!folder) {
+            folder = {
+                id: `folder_${Date.now()}`,
+                name: folderName,
+                maxCollections: 50,
+                maxQuizzes: 5000
+            };
+            this.folders.push(folder);
+        }
+
+        files.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+
+        const added = [];
+        const skipped = [];
+        this.showSyncOverlay('📂 フォルダを読み込み中...', `${files.length} 件のCSVを処理しています`);
+
+        try {
+            for (const file of files) {
+                const name = file.name.replace(/\.csv$/i, '');
+                let quizzes;
+                try {
+                    quizzes = this.csvTextToQuizzes(await file.text());
+                } catch (err) {
+                    skipped.push(`${name}（読み込み失敗）`);
+                    continue;
+                }
+
+                if (quizzes.length === 0) {
+                    skipped.push(`${name}（問題なし）`);
+                    continue;
+                }
+                if (quizzes.length > this.limits.maxQuizzesPerCollection) {
+                    skipped.push(`${name}（${quizzes.length}問 / 上限${this.limits.maxQuizzesPerCollection}問超過）`);
+                    continue;
+                }
+
+                const usage = this.getFolderUsage(folder.name);
+                if (usage.collectionCount >= folder.maxCollections) {
+                    skipped.push(`${name}（フォルダの問題集数が上限）`);
+                    continue;
+                }
+                if (usage.quizCount + quizzes.length > folder.maxQuizzes) {
+                    skipped.push(`${name}（フォルダの問題数が上限）`);
+                    continue;
+                }
+
+                this.collections.push({
+                    id: `${Date.now()}_${added.length}`,
+                    name: name,
+                    quizzes: quizzes,
+                    created_at: new Date().toISOString(),
+                    folder: folder.name,
+                    isCloudPlaceholder: false,
+                    isDownloaded: true,
+                    quizCount: quizzes.length
+                });
+                added.push(`${name}（${quizzes.length}問）`);
+            }
+        } finally {
+            this.hideSyncOverlay();
+        }
+
+        this.selectedFolderId = folder.id;
+        const visible = this.getVisibleCollections();
+        this.currentCollection = visible.length > 0 ? visible[0] : null;
+        this.updateUI();
+        this.saveToLocalStorage();
+
+        const quizTotal = this.getFolderUsage(folder.name).quizCount;
+        console.log(`📂 フォルダ「${folderName}」から ${added.length} 問題集を取り込みました`);
+
+        alert(
+            `フォルダ「${folderName}」を取り込みました\n\n` +
+            `問題集: ${added.length}件（フォルダ合計 ${quizTotal}問）\n` +
+            (added.length ? `\n${added.join('\n')}\n` : '') +
+            (skipped.length ? `\n取り込めなかったもの:\n${skipped.join('\n')}` : '')
+        );
     }
 
     exportCsv() {
@@ -3490,7 +3606,7 @@ class QuizManager {
 
         // 非表示にするボタン（編集・保存系）
         const hideIds = [
-            'saveBtn', 'importCsvBtn',
+            'saveBtn', 'importCsvBtn', 'importCsvFolderBtn',
             'newFolderBtn', 'downloadFolderBtn',
             'newCollectionBtn',
             'newQuizBtn', 'deleteQuizBtn',
