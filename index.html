@@ -45,6 +45,7 @@
                         <h3>フォルダ一覧</h3>
                         <div class="list-toolbar">
                             <button id="newFolderBtn" class="btn btn-sm btn-primary" title="新規フォルダを作成">＋</button>
+                            <button id="importCsvFolderBtn" class="btn btn-sm btn-secondary" title="CSVの入ったフォルダを読み込み、同じ名前のフォルダを作って問題集を入れる">📂</button>
                             <button id="downloadFolderBtn" class="btn btn-sm btn-secondary" title="フォルダ内の問題集を一括ダウンロード">DL</button>
                         </div>
                     </div>
@@ -56,7 +57,6 @@
                         <div class="list-toolbar">
                             <button id="newCollectionBtn" class="btn btn-sm btn-primary" title="新規問題集を作成">＋</button>
                             <button id="importCsvBtn" class="btn btn-sm btn-secondary" title="CSVファイル1つを問題集として読み込む">読込</button>
-                            <button id="importCsvFolderBtn" class="btn btn-sm btn-secondary" title="フォルダ内のCSVをまとめて読み込む（CSV1つ＝問題集1つ）">📂</button>
                         </div>
                     </div>
                     <select id="collectionList" size="10" class="context-menu-target"></select>
@@ -401,7 +401,7 @@
 
     <input type="file" id="fileInput" style="display:none;" accept=".json">
     <input type="file" id="csvFileInput" style="display:none;" accept=".csv">
-    <input type="file" id="csvFolderInput" style="display:none;" accept=".csv" webkitdirectory directory multiple>
+    <input type="file" id="csvFolderInput" style="display:none;" webkitdirectory directory multiple>
 
     <!-- Firebase SDK -->
     <script type="module">

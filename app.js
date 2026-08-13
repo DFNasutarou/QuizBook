@@ -580,6 +580,9 @@ class QuizManager {
         document.getElementById('newFolderBtn').addEventListener('click', () => this.newFolder());
         document.getElementById('downloadFolderBtn').addEventListener('click', () => this.downloadCurrentFolderFromCloud());
 
+        const importCsvFolderBtn = document.getElementById('importCsvFolderBtn');
+        if (importCsvFolderBtn) importCsvFolderBtn.addEventListener('click', () => this.importCsvFolder());
+
         // CSV関連
         const importCsvBtn = document.getElementById('importCsvBtn');
         if (importCsvBtn) importCsvBtn.addEventListener('click', () => this.importCsv());
