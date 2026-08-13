@@ -1,0 +1,50 @@
+# -*- coding: utf-8 -*-
+"""変換スクリプト共通の処理。"""
+import csv
+import re
+
+# QuizBook の1問題集あたりの上限（app.js の limits.maxQuizzesPerCollection と揃える）
+MAX_PER_COLLECTION = 500
+
+CSV_HEADER = ['問題文', '答え', 'メモ', 'ジャンル', '難易度', 'タグ']
+
+# 見出しから形式を判定する
+PAPER_RE = re.compile(r'ペーパー|筆記|予選\s*ペーパー')
+BUZZER_RE = re.compile(r'早押し|通過|[0-9０-９]+\s*[RＲ]|セット|○[×✕]|コース')
+
+
+def section_kind(heading):
+    """見出しの文字列から「ペーパー」か「早押し」かを判定する"""
+    if not heading:
+        return None
+    if PAPER_RE.search(heading):
+        return 'ペーパー'
+    if BUZZER_RE.search(heading):
+        return '早押し'
+    return None
+
+
+def write_collections(rows_by_section, out_dir, base_name, limit=MAX_PER_COLLECTION):
+    """形式ごとに分け、さらに上限問数で分割してCSVを書き出す。
+
+    戻り値: [(ファイル名, 問数), ...]
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written = []
+
+    # 中身のある区分だけを対象にする
+    sections = [(name, rows) for name, rows in rows_by_section.items() if rows]
+    single_section = len(sections) == 1
+
+    for name, rows in sections:
+        stem = base_name if single_section else f'{base_name}_{name}'
+        chunks = [rows[i:i + limit] for i in range(0, len(rows), limit)] or [[]]
+        for idx, chunk in enumerate(chunks, 1):
+            suffix = '' if len(chunks) == 1 else f'_{idx}'
+            path = out_dir / f'{stem}{suffix}.csv'
+            with open(path, 'w', encoding='utf-8-sig', newline='') as f:
+                w = csv.writer(f, quoting=csv.QUOTE_ALL)
+                w.writerow(CSV_HEADER)
+                w.writerows(chunk)
+            written.append((path.name, len(chunk)))
+    return written
