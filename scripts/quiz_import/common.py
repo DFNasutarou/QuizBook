@@ -24,6 +24,28 @@ def section_kind(heading):
     return None
 
 
+def dedupe(rows_by_section):
+    """同じ問題文が複数回出てきたら最初の1件だけ残す。
+
+    記録集は同じ問題を「一覧」と「各ラウンドの詳細」に重ねて載せることが多く、
+    そのまま取り込むと出題時に同じ問題が何度も出てしまう。
+    """
+    seen = set()
+    result = {}
+    removed = 0
+    for name, rows in rows_by_section.items():
+        kept = []
+        for r in rows:
+            key = re.sub(r'\s+', '', r[0])
+            if key in seen:
+                removed += 1
+                continue
+            seen.add(key)
+            kept.append(r)
+        result[name] = kept
+    return result, removed
+
+
 def write_collections(rows_by_section, out_dir, base_name, limit=MAX_PER_COLLECTION):
     """形式ごとに分け、さらに上限問数で分割してCSVを書き出す。
 

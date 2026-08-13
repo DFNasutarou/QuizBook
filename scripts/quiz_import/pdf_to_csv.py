@@ -29,6 +29,7 @@
 """
 import argparse
 import re
+import unicodedata
 import sys
 from collections import Counter
 from pathlib import Path
@@ -39,7 +40,7 @@ except ImportError:
     sys.exit('PyMuPDF が必要です:  pip install pymupdf')
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import section_kind, write_collections, MAX_PER_COLLECTION
+from common import section_kind, write_collections, dedupe, MAX_PER_COLLECTION
 
 DEFAULT_GENRE = 'ノンジャンル'
 DEFAULT_DIFFICULTY = 5
@@ -129,21 +130,53 @@ def detect_layout(doc):
 
     layout = {'body_size': body, 'page_width': width}
 
-    # --- 答えの列の左端を探す（同じXから始まる片が多く集まる場所）---
-    starts = Counter(round(it['x0']) for it in big if it['x0'] > width * 0.3)
-    ans_x0 = None
-    if starts:
-        cand, cnt = starts.most_common(1)[0]
-        if cnt >= max(4, len(big) * 0.02):
-            ans_x0 = cand
-    if ans_x0:
-        # 答えの列より左で終わっている片の右端 = 問題文が伸びる限界
-        q_right = max((it['x1'] for it in big
-                       if it['x0'] < ans_x0 - 5 and it['x1'] < ans_x0), default=0)
-        layout['x_split'] = round((q_right + ans_x0) / 2) if q_right else ans_x0 - 4
+    # --- 列の境界を探す ---
+    #     列の境界とは「多くの行で文字が無く、かつその右にはまだ内容がある」位置。
+    #     列の開始位置が揃っているとは限らない（答えが中央寄せの作りもある）ので、
+    #     開始位置ではなく“縦に空いている帯”を手掛かりにする。
+    by_line = {}
+    for it in big:
+        by_line.setdefault(round((it['y0'] + it['y1']) / 2 / 3), []).append(it)
+    lines = [sorted(v, key=lambda it: it['x0']) for v in by_line.values()]
+
+    def boundary_score(x):
+        empty = right = 0
+        for items in lines:
+            if any(it['x0'] - 1 <= x <= it['x1'] + 1 for it in items):
+                continue                       # その行はここに文字がある
+            empty += 1
+            if any(it['x0'] > x for it in items):
+                right += 1                     # 右にまだ内容がある
+        if not lines:
+            return 0, 0
+        return (empty / len(lines)) * (right / len(lines)), right
+
+    step = 2
+    candidates = []
+    for x in range(int(width * 0.25), int(width * 0.95), step):
+        s, right = boundary_score(x)
+        if right >= max(4, len(lines) * 0.15):
+            candidates.append((s, x))
+
+    layout['answer_x0'] = None
+    if candidates:
+        best = max(candidates)[0]
+        # 帯が複数あるとき（答えの右にさらに備考の列がある等）は、
+        # いちばん左の帯が問題文と答えの境界にあたる
+        good = sorted(x for s, x in candidates if s >= best * 0.75)
+        first = good[0]
+        band = [x for x in good if x <= first + 20]     # 同じ帯の中の位置をまとめる
+        layout['x_split'] = round(sum(band) / len(band))
+        # 答えの列の左端（境界のすぐ右で文字が始まる位置）
+        after = [it['x0'] for it in big if it['x0'] > layout['x_split']]
+        if after:
+            layout['answer_x0'] = round(min(after))
+        # さらに右に別の帯があれば、そこから先は備考とみなす
+        far = [x for s, x in candidates if x >= layout['x_split'] + 50 and s >= best * 0.5]
+        if far:
+            layout['memo_x'] = min(far)
     else:
         layout['x_split'] = round(width * 0.62)
-    layout['answer_x0'] = ans_x0
 
     # --- 問題文の列の左端（幅のある片が繰り返し始まる位置）---
     wide = Counter(round(it['x0']) for it in big
@@ -252,6 +285,8 @@ def tune(doc, layout, pages, fixed=()):
 
 # ------------------------------------------------------------------ 表の組み立て
 def clean(text):
+    # 康熙部首（⼈ ⼤ など漢字に似た別文字）や全角英数が混じるPDFがあるため揃える
+    text = unicodedata.normalize('NFKC', text)
     text = text.replace('／', '').replace('/', '').replace('⁄', '')
     text = re.sub(r'[ \t　]+', ' ', text)
     text = re.sub(r' +([、。？！」』）])', r'\1', text)
@@ -580,7 +615,20 @@ def build_config(doc, args):
     if args.require_question_end:
         layout['require_question_end'] = True
 
-    return tune(doc, layout, sample_pages(doc), fixed)
+    pages = sample_pages(doc)
+    cfg, sc = tune(doc, layout, pages, fixed)
+
+    # 成績表や講評など、問題以外の記述が多く混じる記録集では、
+    # 疑問の形で終わらないものを捨てたほうが結果が良くなる。
+    # 取りこぼしが一定を超えたら自動で有効にする（--keep-all で無効化）。
+    if not args.keep_all and not cfg.get('require_question_end'):
+        rows, _ = to_rows(extract(doc, cfg, pages), cfg)
+        rows = [r for rs in rows.values() for r in rs]
+        if rows:
+            ok = sum(1 for r in rows if QUESTION_END_RE.search(r[0])) / len(rows)
+            if ok < 0.75:
+                cfg['require_question_end'] = True
+    return cfg, sc
 
 
 def convert(path, args):
@@ -592,16 +640,17 @@ def convert(path, args):
 
     cfg['tag'] = args.tag or path.stem
     by_section, dropped = to_rows(extract(doc, cfg), cfg)
+    by_section, duplicated = dedupe(by_section)
     rows = [r for rs in by_section.values() for r in rs]
 
     if args.analyze:
         print(f'\n=== {path.name} ({doc.page_count}ページ) ===')
         print('  検出したレイアウト:')
-        for key in ('body_size', 'x_split', 'answer_x0', 'num_min', 'num_max',
-                    'q_indent', 'small_as', 'anchor_source', 'anchor_mode'):
+        for key in ('body_size', 'x_split', 'answer_x0', 'memo_x', 'num_min', 'num_max',
+                    'q_indent', 'q_min', 'small_as', 'anchor_source', 'anchor_mode'):
             if cfg.get(key) is not None:
                 print(f'    {key:<14}= {cfg[key]}')
-        print(f'  抽出: {len(rows)}問（除外 {dropped}）'
+        print(f'  抽出: {len(rows)}問（除外 {dropped} / 重複 {duplicated}）'
               f' / 確からしさ {score(rows) * 100:.0f}点')
         for row in rows[:3]:
             print(f'\n    問題: {row[0][:100]}')
@@ -620,8 +669,13 @@ def convert(path, args):
     written = write_collections(by_section, out_dir, args.out or path.stem, args.limit)
     for name, n in written:
         print(f'✓ {name:<44}{n:>5}問')
+    note = []
     if dropped:
-        print(f'    （{path.stem}: 除外 {dropped}）')
+        note.append(f'除外 {dropped}')
+    if duplicated:
+        note.append(f'重複 {duplicated}')
+    if note:
+        print(f"    （{path.stem}: {' / '.join(note)}）")
     return len(rows)
 
 
@@ -653,7 +707,9 @@ def main():
     g.add_argument('--require-answer-column', action='store_true',
                    help='答えの列が無いページを飛ばす')
     g.add_argument('--require-question-end', action='store_true',
-                   help='疑問の形で終わらない問題を捨てる')
+                   help='疑問の形で終わらない問題を捨てる（既定: 取りこぼしが多いと自動で有効）')
+    g.add_argument('--keep-all', action='store_true',
+                   help='疑問の形で終わらないものも残す（自動有効化をやめる）')
 
     args = p.parse_args()
     target = Path(args.input)

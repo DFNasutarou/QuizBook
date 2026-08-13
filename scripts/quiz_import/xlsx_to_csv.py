@@ -26,13 +26,14 @@ Excel の「ふりがな」(rPh) は自動生成のカタカナが全漢字に�
 """
 import argparse
 import re
+import unicodedata
 import sys
 import zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import section_kind, write_collections, MAX_PER_COLLECTION
+from common import section_kind, write_collections, dedupe, MAX_PER_COLLECTION
 
 NS = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
 NS_R = '{http://schemas.openxmlformats.org/officeDocument/2006/relationships}'
@@ -159,8 +160,9 @@ def looks_like_quiz(rows, cols):
 def clean_text(text):
     if not text:
         return ''
+    text = unicodedata.normalize('NFKC', str(text))
     # 「/」は読み上げ到達点のマーカーなので除去する
-    text = str(text).replace('／', '').replace('/', '').replace('⁄', '')
+    text = text.replace('／', '').replace('/', '').replace('⁄', '')
     text = text.replace('\r\n', '\n').replace('\r', '\n')
     text = re.sub(r'[ \t　]*\n[ \t　]*', ' ', text)
     return re.sub(r'[ \t　]{2,}', ' ', text).strip()
@@ -246,7 +248,10 @@ def convert(path, args):
         base = args.out or path.stem
         if len(sheets) > 1:
             base = f'{base}_{re.sub(r"[\\\\/:*?<>|]", "", name)[:24]}'
-        for fname, n in write_collections({section or 'all': records}, out_dir, base, args.limit):
+        deduped, duplicated = dedupe({section or 'all': records})
+        if duplicated:
+            print(f'    （{name}: 重複 {duplicated}）')
+        for fname, n in write_collections(deduped, out_dir, base, args.limit):
             print(f'✓ {fname:<44}{n:>5}問')
         total += len(records)
     return total
