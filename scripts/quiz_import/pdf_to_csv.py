@@ -49,6 +49,9 @@ NUM_ONLY = re.compile(r'^\s*(\d{1,4})\s*[\.．、]?\s*$')
 NUM_HEAD = re.compile(r'^\s*([0-9０-９]{1,4})\s*(?:[\.．、]\s*|\s+)(.*)$', re.S)
 ZEN2HAN = str.maketrans('０１２３４５６７８９', '0123456789')
 
+# 同じ行とみなすY座標の幅（pt）。PDFでは同一行でも左右で数値がわずかにずれる
+LINE_TOLERANCE = 3
+
 # 問題文らしい終わり方。レイアウト判定の採点にも使う
 QUESTION_END_RE = re.compile(
     r'(?:[？?]|でしょう[かうっ]?|ですか|は何|は誰|はどこ|という|どれ|まで|'
@@ -139,7 +142,7 @@ def detect_layout(doc):
     #     開始位置ではなく“縦に空いている帯”を手掛かりにする。
     by_line = {}
     for it in big:
-        by_line.setdefault(round((it['y0'] + it['y1']) / 2 / 3), []).append(it)
+        by_line.setdefault(round((it['y0'] + it['y1']) / 2 / LINE_TOLERANCE), []).append(it)
     lines = [sorted(v, key=lambda it: it['x0']) for v in by_line.values()]
 
     def boundary_score(x):
@@ -281,6 +284,9 @@ def tune(doc, layout, pages, fixed=()):
             # 「1ページあたり何問取れたか」で割り引く
             coverage = min(1.0, len(rows) / max(1, len(pages) * 1.5))
             s = score(rows) * coverage
+            # 僅差ならルビを本文へ戻す設定を選ぶ（読みが残るほうが役に立つ）
+            if small == 'ruby':
+                s += 0.02
             if s > best_score:
                 best, best_score = cand, s
     return best, best_score
@@ -463,7 +469,7 @@ def extract(doc, cfg, pages=None):
         # 同じ行の文字片をまとめ、行ごとに列の境界を決める
         lines = {}
         for it in bases:
-            lines.setdefault(round((it['y0'] + it['y1']) / 2 / 3), []).append(it)
+            lines.setdefault(round((it['y0'] + it['y1']) / 2 / LINE_TOLERANCE), []).append(it)
         boundary = {k: line_boundary(v, cfg) for k, v in lines.items()}
 
         cells = []
@@ -472,7 +478,7 @@ def extract(doc, cfg, pages=None):
                           'x': it['x0'], 'text': it['text']})
         for it in bases:
             yc = (it['y0'] + it['y1']) / 2
-            for key, text in split_by_column(it, cfg, boundary[round(yc / 3)]).items():
+            for key, text in split_by_column(it, cfg, boundary[round(yc / LINE_TOLERANCE)]).items():
                 if key != 'x' and text.strip():
                     cells.append({'key': key, 'y': yc, 'x': it['x0'], 'text': text})
 
@@ -480,7 +486,7 @@ def extract(doc, cfg, pages=None):
             for it in smalls:
                 yc = (it['y0'] + it['y1']) / 2
                 if column_of_x((it['x0'] + it['x1']) / 2, cfg,
-                               boundary.get(round(yc / 3))) in ('a', 'm'):
+                               boundary.get(round(yc / LINE_TOLERANCE))) in ('a', 'm'):
                     cells.append({'key': 'm', 'y': yc, 'x': it['x0'], 'text': it['text']})
 
         # --- 行の目印になる問題番号を集める ---
@@ -539,8 +545,11 @@ def extract(doc, cfg, pages=None):
             target[c['key']].append(c)
 
         for a in anchors:
+            # 同じ行でも左右で数値がわずかにずれることがあるため、
+            # まず行にまとめてから左→右に並べる。
+            # （Y座標をそのまま使うと、右側の断片が先に来て文が入れ替わる）
             for key in ('q', 'a', 'm'):
-                a[key].sort(key=lambda c: (round(c['y'], 1), c['x']))
+                a[key].sort(key=lambda c: (round(c['y'] / LINE_TOLERANCE), c['x']))
 
             # 右列に答えと判定・解説が混在する形では、
             # 判定記号（[◯◯○] など）から後ろをメモへ回す

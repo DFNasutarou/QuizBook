@@ -75,7 +75,14 @@ def write_collections(rows_by_section, out_dir, base_name, limit=MAX_PER_COLLECT
         for idx, chunk in enumerate(chunks, 1):
             suffix = '' if len(chunks) == 1 else f'_{idx}'
             path = out_dir / f'{stem}{suffix}.csv'
-            with open(path, 'w', encoding='utf-8-sig', newline='') as f:
+            try:
+                f = open(path, 'w', encoding='utf-8-sig', newline='')
+            except PermissionError:
+                raise SystemExit(
+                    f'書き込めません: {path}\n'
+                    'このファイルを Excel などで開いていないか確認してください。'
+                )
+            with f:
                 w = csv.writer(f, quoting=csv.QUOTE_ALL)
                 w.writerow(CSV_HEADER)
                 w.writerows(chunk)
