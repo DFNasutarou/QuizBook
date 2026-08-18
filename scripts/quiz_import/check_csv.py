@@ -11,6 +11,9 @@
 
 判定している「怪しさ」:
     列こぼれ  … 答えが助詞や拗音で始まる（問題文の末尾が答え側へ流れた形）
+    こぼれ(メモ) … メモが助詞や拗音で始まる（答えの末尾がメモ側へ流れた形）
+    括弧の不一致 … 答えやメモで括弧の開きと閉じの数が合わない
+                   （答えが途中で切れてメモへ流れた行で起きやすい）
     問題文途中 … 問題文が疑問の形で終わっていない
     問題混在  … 問題文の中に「？」が複数ある（2問が繋がった形）
     答えが長い … 答えが40字を超える（解説を巻き込んだ形）
@@ -28,6 +31,13 @@ QUESTION_END_RE = re.compile(
     r'(?:[？?]|でしょう[かうっ]?|ですか|は何|は誰|はどこ|という|どれ|まで|'
     r'答えなさい|お答えください)[\s。]*$'
 )
+# 括弧の開きと閉じの数が合わない = 語の途中で列をまたいで切れた形
+BRACKETS = (('「', '」'), ('『', '』'), ('（', '）'), ('(', ')'),
+            ('【', '】'), ('〈', '〉'), ('《', '》'))
+
+
+def unbalanced(text):
+    return any(text.count(open_) != text.count(close) for open_, close in BRACKETS)
 
 
 def inspect(path):
@@ -42,9 +52,14 @@ def inspect(path):
         if len(r) < 2:
             continue
         q, a = r[0], r[1]
+        memo = r[2] if len(r) > 2 else ''
         reasons = []
         if BLEED_RE.match(a):
             reasons.append('列こぼれ')
+        if BLEED_RE.match(memo):
+            reasons.append('こぼれ(メモ)')
+        if unbalanced(a) or unbalanced(memo):
+            reasons.append('括弧の不一致')
         if not QUESTION_END_RE.search(q):
             reasons.append('問題文途中')
         if len(re.findall(r'[？?]', q)) >= 2:

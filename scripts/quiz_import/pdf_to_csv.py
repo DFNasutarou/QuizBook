@@ -310,9 +310,10 @@ def strip_heading(text):
     return text
 
 
-def column_of_x(cx, cfg, x_split=None):
+def column_of_x(cx, cfg, x_split=None, memo_x=None):
     """X座標がどの列（問題文/答え/備考）に属するかを返す"""
-    memo_x = cfg.get('memo_x')
+    if memo_x is None:
+        memo_x = cfg.get('memo_x')
     if memo_x and cx >= memo_x:
         return 'm'
     if cx >= (cfg['x_split'] if x_split is None else x_split):
@@ -361,7 +362,46 @@ def line_boundary(line_items, cfg):
     return best_x if best_x is not None else base
 
 
-def split_by_column(item, cfg, x_split=None):
+def text_runs(line_items, x_from, gap_tol=4):
+    """1行の文字を、途切れの無い塊（run）にまとめて [(左, 右), ...] で返す"""
+    spans = sorted((c['bbox'][0], c['bbox'][2])
+                   for it in line_items for c in it['chars']
+                   if c['c'].strip() and (c['bbox'][0] + c['bbox'][2]) / 2 >= x_from)
+    runs = []
+    for x0, x1 in spans:
+        if runs and x0 - runs[-1][1] < gap_tol:
+            runs[-1][1] = max(runs[-1][1], x1)
+        else:
+            runs.append([x0, x1])
+    return runs
+
+
+def line_memo_boundary(line_items, cfg, x_split):
+    """1行の中の、答えと備考（解答者名など）の境界Xを求める。
+
+    答えの長さは行ごとに違うので、境界をファイル全体で固定にすると
+    長い答えの後半が備考側へこぼれる。
+      誤: 答え「トレーニン」  備考「グパンツ スルー」
+      正: 答え「トレーニングパンツ」  備考「スルー」
+
+    固定の境界が文字の途中に落ちた行だけを直す。空白の位置で切り直すと、
+    ルビで字間が空いた答え（渡辺(わたなべ)太(ふとし)）まで割れてしまう。
+    """
+    base = cfg.get('memo_x')
+    if not base:
+        return None
+
+    runs = text_runs(line_items, x_split)
+    for i, (x0, x1) in enumerate(runs):
+        if not x0 < base <= x1:
+            continue
+        # この塊は途中で切ってはいけない。次の空白まで境界を送る
+        following = runs[i + 1][0] if i + 1 < len(runs) else None
+        return (x1 + following) / 2 if following else x1 + 1
+    return base
+
+
+def split_by_column(item, cfg, x_split=None, memo_x=None):
     """1つの文字片を、文字ごとのX座標で列へ切り分ける。
 
     問題文と答えが同じ文字片にまとめられているPDFがあるため、
@@ -371,7 +411,7 @@ def split_by_column(item, cfg, x_split=None):
 
     # ルビ差し込み済みの片は文字数が合わないので、その場合は列を分けない
     if len(item['text']) != len(item['chars']):
-        key = column_of_x((item['x0'] + item['x1']) / 2, cfg, x_split)
+        key = column_of_x((item['x0'] + item['x1']) / 2, cfg, x_split, memo_x)
         return {k: (item['text'] if k == key else '') for k in buckets}
 
     # 文字は左から右へ並ぶので、列は切り替わったら戻らないものとして扱う。
@@ -380,7 +420,7 @@ def split_by_column(item, cfg, x_split=None):
     order = ['x', 'q', 'a', 'm']
     rank = -1
     for ch in item['chars']:
-        key = column_of_x((ch['bbox'][0] + ch['bbox'][2]) / 2, cfg, x_split)
+        key = column_of_x((ch['bbox'][0] + ch['bbox'][2]) / 2, cfg, x_split, memo_x)
         idx = order.index(key)
         if idx < rank:
             key = order[rank]
@@ -471,6 +511,7 @@ def extract(doc, cfg, pages=None):
         for it in bases:
             lines.setdefault(round((it['y0'] + it['y1']) / 2 / LINE_TOLERANCE), []).append(it)
         boundary = {k: line_boundary(v, cfg) for k, v in lines.items()}
+        memo_bound = {k: line_memo_boundary(v, cfg, boundary[k]) for k, v in lines.items()}
 
         cells = []
         for it in number_items:
@@ -478,15 +519,18 @@ def extract(doc, cfg, pages=None):
                           'x': it['x0'], 'text': it['text']})
         for it in bases:
             yc = (it['y0'] + it['y1']) / 2
-            for key, text in split_by_column(it, cfg, boundary[round(yc / LINE_TOLERANCE)]).items():
+            line_key = round(yc / LINE_TOLERANCE)
+            for key, text in split_by_column(it, cfg, boundary[line_key],
+                                             memo_bound[line_key]).items():
                 if key != 'x' and text.strip():
                     cells.append({'key': key, 'y': yc, 'x': it['x0'], 'text': text})
 
         if small_as == 'memo':
             for it in smalls:
                 yc = (it['y0'] + it['y1']) / 2
-                if column_of_x((it['x0'] + it['x1']) / 2, cfg,
-                               boundary.get(round(yc / LINE_TOLERANCE))) in ('a', 'm'):
+                line_key = round(yc / LINE_TOLERANCE)
+                if column_of_x((it['x0'] + it['x1']) / 2, cfg, boundary.get(line_key),
+                               memo_bound.get(line_key)) in ('a', 'm'):
                     cells.append({'key': 'm', 'y': yc, 'x': it['x0'], 'text': it['text']})
 
         # --- 行の目印になる問題番号を集める ---
