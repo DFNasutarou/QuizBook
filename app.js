@@ -544,21 +544,6 @@ class QuizManager {
                     e.preventDefault();
                     this.nextQuiz();
                     break;
-                case 'e':
-                case 'E':
-                    e.preventDefault();
-                    this.editCurrentQuiz();
-                    break;
-                case 'f':
-                case 'F':
-                    e.preventDefault();
-                    this.toggleCurrentQuizFlag('factChecked');
-                    break;
-                case 'r':
-                case 'R':
-                    e.preventDefault();
-                    this.toggleCurrentQuizFlag('needsReview');
-                    break;
             }
         });
     }
@@ -2487,8 +2472,8 @@ class QuizManager {
         if (factBtn) {
             factBtn.textContent = checked ? '✅ 確認済み' : '⬜ 未確認';
             factBtn.title = checked
-                ? 'ファクトチェック済みを取り消す（Fキー）'
-                : 'ファクトチェック済みにする（Fキー）';
+                ? 'ファクトチェック済みを取り消す'
+                : 'ファクトチェック済みにする';
         }
 
         // 要確認は付いているときだけ目印を出す（普段は付いていない状態が普通のため）
@@ -2501,8 +2486,8 @@ class QuizManager {
         if (reviewBtn) {
             reviewBtn.textContent = review ? '🚩 要確認' : '⬜ 要確認なし';
             reviewBtn.title = review
-                ? '要確認の印を外す（Rキー）'
-                : '要確認の印を付ける（Rキー）';
+                ? '要確認の印を外す'
+                : '要確認の印を付ける';
         }
     }
 
