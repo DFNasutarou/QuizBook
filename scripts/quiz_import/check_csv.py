@@ -69,7 +69,8 @@ def count_questions(question):
     """
     count = 0
     for m in QUESTION_TAIL_RE.finditer(question):
-        if question[m.end():m.end() + 1] in CLOSING:
+        after = question[m.end():m.end() + 1]
+        if after and after in CLOSING:
             continue
         count += 1
     return count
