@@ -61,6 +61,8 @@ class QuizManager {
         this.limits = {
             maxQuizzesPerCollection: 500
         };
+        // 「まとめて確認」で一度に依頼する問数
+        this.bulkFactCheckCount = 20;
         this.quizSelectionInitialized = false;
         this.quizSelectedFolderNames = new Set();
         this.quizSelectedCollectionIds = new Set();
@@ -796,6 +798,10 @@ class QuizManager {
         const factCheckQuizBtn = document.getElementById('factCheckQuizBtn');
         if (factCheckQuizBtn) {
             factCheckQuizBtn.addEventListener('click', () => this.factCheckCurrentQuiz());
+        }
+        const bulkFactCheckQuizBtn = document.getElementById('bulkFactCheckQuizBtn');
+        if (bulkFactCheckQuizBtn) {
+            bulkFactCheckQuizBtn.addEventListener('click', () => this.bulkFactCheckFromCurrent());
         }
 
         // ファイル入力
@@ -4430,6 +4436,60 @@ class QuizManager {
         this.openClaudeWebForFactCheck(quiz.question, quiz.answer);
     }
 
+    // いま表示している問題から先の、まだ確認していない問題を集める
+    collectQuizzesForBulkFactCheck(count) {
+        const picked = [];
+        for (let i = this.quizMode.currentIndex; i < this.quizMode.quizzes.length; i++) {
+            const quiz = this.quizMode.quizzes[i];
+            if (quiz.factChecked) continue;      // 確認済みは飛ばす
+            picked.push({ position: i + 1, quiz });
+            if (picked.length >= count) break;
+        }
+        return picked;
+    }
+
+    bulkFactCheckFromCurrent() {
+        if (!this.quizMode.active) return;
+
+        const picked = this.collectQuizzesForBulkFactCheck(this.bulkFactCheckCount);
+        if (picked.length === 0) {
+            alert('ここから先に、まだ確認していない問題がありません');
+            return;
+        }
+
+        // 直したい問題を探せるよう、出題順の番号と出典を添える
+        const body = picked.map((p, i) => {
+            const source = p.quiz.sourceCollectionName
+                ? `\n出典: ${p.quiz.sourceCollectionName}`
+                : '';
+            return `【${i + 1}】（出題順 ${p.position}問目）${source}\n`
+                + `問題: ${p.quiz.question}\n`
+                + `答え: ${p.quiz.answer}`;
+        }).join('\n\n');
+
+        const prompt = `以下の${picked.length}問のクイズについて、事実確認をお願いします。
+
+${body}
+
+各問について、次の形式で簡潔に答えてください。
+
+【番号】判定（正しい / 誤り / 要確認）
+　理由・指摘（誤りや曖昧な点があれば具体的に。無ければ「問題なし」）
+
+判定の観点:
+1. 答えの正確性（事実として正しいか）
+2. 問題文の明確性（曖昧な表現や、答えが一つに定まらない書き方がないか）
+3. 答えが複数ありうる場合は、その別解`;
+
+        const total = this.quizMode.quizzes.length;
+        const remaining = this.quizMode.quizzes
+            .slice(this.quizMode.currentIndex)
+            .filter(q => !q.factChecked).length;
+        const detail = `${picked.length}問（出題順 ${picked[0].position}〜${picked[picked.length - 1].position}問目 / 全${total}問中）`
+            + (remaining > picked.length ? `<br>この先の未確認は残り ${remaining - picked.length}問` : '');
+        this.sendPromptToClaude(prompt, detail);
+    }
+
     openClaudeWebForFactCheck(questionText, answerText) {
         // 引数が無いときは編集フォームの内容を使う
         const question = (questionText !== undefined
@@ -4461,10 +4521,14 @@ ${answer}
 
 簡潔かつ具体的に回答してください。`;
 
-        // クリップボードにコピー
+        this.sendPromptToClaude(prompt);
+    }
+
+    // 質問文をクリップボードへ入れて Claude.ai を開く
+    sendPromptToClaude(prompt, detail = 'Claude.aiが開くので、Ctrl+V で貼り付けてください') {
         navigator.clipboard.writeText(prompt).then(() => {
             this.showNotification(
-                '<strong>📋 質問をコピーしました！</strong><br><small>Claude.aiが開くので、Ctrl+V で貼り付けてください</small>',
+                `<strong>📋 質問をコピーしました！</strong><br><small>${detail}</small>`,
                 'success'
             );
 
