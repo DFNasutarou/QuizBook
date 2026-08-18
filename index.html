@@ -204,6 +204,7 @@
         <!-- 問題編集タブ -->
         <div id="edit-tab" class="tab-content">
             <div class="edit-form">
+                <div id="editContextBar" class="edit-context-bar" style="display:none;"></div>
                 <div class="form-group">
                     <label for="questionInput">問題文:</label>
                     <textarea id="questionInput" rows="4" placeholder="問題文を入力してください"></textarea>
@@ -273,6 +274,7 @@
 
                 <div class="form-actions">
                     <div class="navigation-buttons">
+                        <button id="backToQuizBtn" class="btn btn-primary" style="display:none;" title="出題画面に戻る（未保存の変更は反映されません）">◀ 出題に戻る</button>
                         <button id="prevQuizEditBtn" class="btn btn-secondary">◀ 前の問題</button>
                         <button id="nextQuizEditBtn" class="btn btn-secondary">次の問題 ▶</button>
                     </div>
@@ -310,13 +312,43 @@
 
             <div class="quiz-filters" id="quizFilters">
                 <h3>出題設定</h3>
-                <div class="form-group">
-                    <label>フォルダを選択:</label>
-                    <div id="quizFolderCheckboxes"></div>
+                <div class="quiz-preset-bar">
+                    <label for="quizPresetSelect">プリセット:</label>
+                    <select id="quizPresetSelect">
+                        <option value="">（未選択）</option>
+                    </select>
+                    <button id="applyQuizPresetBtn" class="btn btn-sm btn-primary" title="選んだプリセットの内容を出題設定に読み込む">読込</button>
+                    <button id="saveQuizPresetBtn" class="btn btn-sm btn-secondary" title="いまの選択内容を新しいプリセットとして保存">新規保存</button>
+                    <button id="overwriteQuizPresetBtn" class="btn btn-sm btn-secondary" title="選んだプリセットをいまの選択内容で上書きする">上書き</button>
+                    <button id="deleteQuizPresetBtn" class="btn btn-sm btn-danger" title="選んだプリセットを削除する">削除</button>
                 </div>
-                <div class="form-group">
-                    <label>問題集を選択:</label>
-                    <div id="quizCollectionCheckboxes"></div>
+
+                <div class="quiz-select-panels">
+                    <div class="quiz-select-panel">
+                        <div class="quiz-select-header">
+                            <h4>フォルダを選択</h4>
+                            <span id="quizFolderCount" class="quiz-select-count"></span>
+                        </div>
+                        <div class="quiz-select-tools">
+                            <input type="search" id="quizFolderSearch" placeholder="フォルダ名で絞り込み">
+                            <button id="quizFolderSelectAllBtn" class="btn btn-sm btn-secondary" title="表示中のフォルダをすべて選択">全選択</button>
+                            <button id="quizFolderClearBtn" class="btn btn-sm btn-secondary" title="表示中のフォルダの選択をすべて解除">全解除</button>
+                        </div>
+                        <div id="quizFolderCheckboxes" class="check-grid"></div>
+                    </div>
+
+                    <div class="quiz-select-panel">
+                        <div class="quiz-select-header">
+                            <h4>問題集を選択</h4>
+                            <span id="quizCollectionCount" class="quiz-select-count"></span>
+                        </div>
+                        <div class="quiz-select-tools">
+                            <input type="search" id="quizCollectionSearch" placeholder="問題集名で絞り込み">
+                            <button id="quizCollectionSelectAllBtn" class="btn btn-sm btn-secondary" title="表示中の問題集をすべて選択">全選択</button>
+                            <button id="quizCollectionClearBtn" class="btn btn-sm btn-secondary" title="表示中の問題集の選択をすべて解除">全解除</button>
+                        </div>
+                        <div id="quizCollectionCheckboxes" class="check-grid"></div>
+                    </div>
                 </div>
                 <div class="form-row">
                     <div class="form-group">
@@ -342,12 +374,15 @@
                         </select>
                     </div>
                 </div>
+
+                <div id="quizSelectionSummary" class="quiz-selection-summary"></div>
             </div>
 
             <div class="quiz-display" id="quizDisplay" style="display:none;">
                 <div class="quiz-header">
                     <div class="quiz-info">
                         <span id="quizCounter">1 / 1</span>
+                        <span id="quizSourceTag" class="source-tag"></span>
                         <span id="quizGenreTag" class="genre-tag"></span>
                         <span id="quizDifficultyTag" class="difficulty-tag"></span>
                     </div>
@@ -356,6 +391,7 @@
                         <button id="toggleAnswerBtn" class="btn btn-primary btn-small">答えを表示</button>
                         <button id="nextQuizBtn" class="btn btn-small">▶</button>
                         <button id="randomQuizBtn" class="btn btn-small">🔀 シャッフル</button>
+                        <button id="editCurrentQuizBtn" class="btn btn-secondary btn-small" title="いま表示している問題を編集タブで開く（Eキー）">✏️ この問題を編集</button>
                     </div>
                 </div>
 
