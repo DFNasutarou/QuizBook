@@ -82,7 +82,7 @@ python -m http.server 8000
 - [Firestoreセキュリティルール設定](FIRESTORE_SECURITY_GUIDE.md)（クラウド同期を使う場合は必読）
 - [事実確認機能の使い方](FACT_CHECK_GUIDE.md)
 - [Chrome拡張機能のインストールガイド](chrome-extension/README.md)
-- [フォルダ構成](docs/FOLDER_STRUCTURE.md)
+- [問題集の取り込み手順](scripts/quiz_import/README.md)（購入したPDF・ExcelをCSVにする）
 
 ## ☁️ クラウド同期の使い方
 
@@ -190,17 +190,13 @@ QuizBook/
 │   ├── background.js
 │   └── README.md
 │
-├── data/                               # データファイル
-│   ├── original/                       # 元のCSVファイル
-│   ├── formatted/                      # 整形済みJSON
-│   └── samples/                        # サンプルファイル
+├── data/csv/                           # 手持ちのCSV
 │
 ├── scripts/                            # ユーティリティスクリプト
-│   └── format_existing_data.py         # データ整形スクリプト
+│   ├── quiz_import/                    # 問題集の取り込み（PDF・Excel → CSV）
+│   └── validate_staged_csv.py          # コミット前のCSV検査
 │
-└── docs/                               # ドキュメント
-    ├── README.md                       # 詳細使用方法
-    └── FOLDER_STRUCTURE.md             # フォルダ構成
+└── docs/README.md                      # 詳細使用方法
 ```
 
 ## 🛠️ 開発
@@ -223,12 +219,15 @@ powershell -ExecutionPolicy Bypass -File scripts/setup-git-hooks.ps1
 - ヘッダーが `問題文,答え,メモ,ジャンル,難易度,タグ` と一致すること
 - 難易度が `1`-`10` または `易/中/難` のいずれかであること
 
-### データ整形（既存CSVファイルがある場合）
+### 問題集の取り込み（購入したPDF・Excelがある場合）
 
 ```bash
-cd scripts
-python format_existing_data.py
+python scripts/quiz_import/pdf_to_csv.py 購入問題/pdf/問題集.pdf
+python scripts/quiz_import/check_csv.py 購入問題/csv
 ```
+
+CSVへ変換したあと、ツールの「問題集管理」タブの 📂 ボタンでフォルダごと読み込みます。
+くわしくは [scripts/quiz_import/README.md](scripts/quiz_import/README.md) を参照してください。
 
 ## 💡 特徴
 

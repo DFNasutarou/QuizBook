@@ -24,29 +24,28 @@
 - ✅ CSV形式でのインポート・エクスポート
 - ✅ 既存問題集の自動整形機能
 
-## バッチ運用
+## 問題集の取り込み
 
-- クイズ作成のCSV更新手順は [QUIZ_BATCH_WORKFLOW.md](QUIZ_BATCH_WORKFLOW.md) を参照
+- 購入した問題集（PDF・Excel）をCSVへ変換して取り込む手順は
+  [scripts/quiz_import/README.md](../scripts/quiz_import/README.md) を参照
 
 ## ファイル構成
 
 ```
-quiz/tools/
-├── index.html                  # メインHTML
-├── styles.css                  # スタイルシート
-├── app.js                      # JavaScriptアプリケーション
+QuizBook/
+├── index.html                  # 画面
+├── styles.css                  # スタイル
+├── app.js                      # 本体
+├── firebase-sync.js            # クラウド同期
+├── firestore.rules             # Firestore のセキュリティルール
 │
-├── scripts/                    # ユーティリティスクリプト
-│   └── format_existing_data.py # データ整形スクリプト（Python）
+├── scripts/
+│   ├── quiz_import/            # 問題集の取り込み（PDF・Excel → CSV）
+│   └── validate_staged_csv.py  # コミット前のCSV検査（.githooks/pre-commit から実行）
 │
-├── data/                       # データファイル
-│   ├── original/               # 元のCSVファイル
-│   ├── formatted/              # 整形済みデータ
-│   └── samples/                # サンプルファイル
-│
-└── docs/                       # ドキュメント
-    ├── README.md               # このファイル
-    └── FOLDER_STRUCTURE.md     # フォルダ構成詳細
+├── data/csv/                   # 手持ちのCSV
+├── chrome-extension/           # 事実確認用の拡張機能
+└── docs/README.md              # このファイル
 ```
 
 ## インストール・使用方法
