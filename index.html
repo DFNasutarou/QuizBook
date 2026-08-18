@@ -21,6 +21,7 @@
                     <span id="syncIcon">☁️</span>
                     <span id="syncStatus">同期OFF</span>
                 </button>
+                <button id="shortcutsHeaderBtn" class="btn btn-secondary" title="ショートカット一覧を見る（?キー）">⌨</button>
                 <a href="?view" class="btn btn-secondary view-mode-link" title="閲覧モードで開く">👁 閲覧モード</a>
             </div>
         </header>
@@ -450,6 +451,12 @@
 
 
             <div class="settings-panel">
+                <h3>操作方法</h3>
+                <button id="showShortcutsBtn" class="btn btn-secondary">⌨ ショートカット一覧を見る</button>
+                <p class="hint-text">どの画面でも <kbd>?</kbd> キーで開けます</p>
+            </div>
+
+            <div class="settings-panel">
                 <h3>データ管理</h3>
                 <button id="clearDataBtn" class="btn btn-danger">全データをクリア</button>
                 <p class="warning-text">※注意: この操作は元に戻せません</p>
@@ -542,6 +549,58 @@
             <div class="sync-spinner"></div>
             <div id="syncOverlayMessage" class="sync-overlay-message">クラウドと同期中...</div>
             <div id="syncOverlayDetail" class="sync-overlay-detail"></div>
+        </div>
+    </div>
+
+    <!-- ショートカット一覧 -->
+    <div id="shortcutsOverlay" class="shortcuts-overlay" style="display:none;">
+        <div class="shortcuts-panel" role="dialog" aria-labelledby="shortcutsTitle">
+            <div class="shortcuts-header">
+                <h3 id="shortcutsTitle">⌨ ショートカット一覧</h3>
+                <button id="closeShortcutsBtn" class="btn btn-small" title="閉じる（Escキー）">×</button>
+            </div>
+
+            <div class="shortcuts-body">
+                <section>
+                    <h4>出題中（出題タブを開いているとき）</h4>
+                    <dl>
+                        <dt><kbd>←</kbd></dt><dd>前の問題へ</dd>
+                        <dt><kbd>→</kbd></dt><dd>次の問題へ</dd>
+                        <dt><kbd>E</kbd></dt><dd>この問題を編集タブで開く</dd>
+                        <dt><kbd>F</kbd></dt><dd>ファクトチェック済みを切り替える</dd>
+                        <dt><kbd>R</kbd></dt><dd>要確認の印を切り替える</dd>
+                    </dl>
+                    <p class="shortcuts-note">出題を開始していないときは働きません。文字を入力しているときも働きません。</p>
+                </section>
+
+                <section>
+                    <h4>候補リストタブ</h4>
+                    <dl>
+                        <dt><kbd>Enter</kbd></dt><dd>候補の入力欄からメモ欄へ移動</dd>
+                        <dt><kbd>Enter</kbd></dt><dd>メモ欄で押すと候補を追加</dd>
+                    </dl>
+                </section>
+
+                <section>
+                    <h4>全体</h4>
+                    <dl>
+                        <dt><kbd>?</kbd></dt><dd>この一覧を開く</dd>
+                        <dt><kbd>Esc</kbd></dt><dd>この一覧を閉じる</dd>
+                    </dl>
+                </section>
+
+                <section>
+                    <h4>マウス操作</h4>
+                    <dl>
+                        <dt>クリック</dt><dd>問題一覧で問題を選ぶ</dd>
+                        <dt>ダブルクリック</dt><dd>その問題を編集タブで開く</dd>
+                        <dt><kbd>Ctrl</kbd>/<kbd>Cmd</kbd> + クリック</dt><dd>問題移動タブで複数選択</dd>
+                        <dt><kbd>Shift</kbd> + クリック</dt><dd>問題移動タブで範囲選択</dd>
+                        <dt>右クリック</dt><dd>フォルダ・問題集の一覧でメニュー（名前変更／削除／CSV出力）</dd>
+                        <dt>右クリック（長押し）</dt><dd>同期ボタンで同期コードを表示</dd>
+                    </dl>
+                </section>
+            </div>
         </div>
     </div>
 

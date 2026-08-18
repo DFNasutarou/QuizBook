@@ -518,11 +518,22 @@ class QuizManager {
 
     setupKeyboardShortcuts() {
         document.addEventListener('keydown', (e) => {
-            // 出題モード中のみキーボードショートカットを有効化
-            if (!this.quizMode.active) return;
-
             // 入力フィールドにフォーカスがある場合は無効化
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+            // ショートカット一覧はどの画面でも開閉できる
+            if (e.key === '?') {
+                e.preventDefault();
+                this.toggleShortcuts();
+                return;
+            }
+            if (e.key === 'Escape') {
+                this.toggleShortcuts(false);
+                return;
+            }
+
+            // ここから先は出題中で、出題タブを開いているときだけ
+            if (!this.quizMode.active || this.currentTab !== 'quiz') return;
 
             switch(e.key) {
                 case 'ArrowLeft':
@@ -535,20 +546,16 @@ class QuizManager {
                     break;
                 case 'e':
                 case 'E':
-                    // 出題画面を見ているときだけ、いまの問題を編集タブで開く
-                    if (this.currentTab !== 'quiz') break;
                     e.preventDefault();
                     this.editCurrentQuiz();
                     break;
                 case 'f':
                 case 'F':
-                    if (this.currentTab !== 'quiz') break;
                     e.preventDefault();
                     this.toggleCurrentQuizFlag('factChecked');
                     break;
                 case 'r':
                 case 'R':
-                    if (this.currentTab !== 'quiz') break;
                     e.preventDefault();
                     this.toggleCurrentQuizFlag('needsReview');
                     break;
@@ -784,6 +791,27 @@ class QuizManager {
         });
         quizFontSizeSlider.addEventListener('change', () => this.saveToLocalStorage());
         document.getElementById('clearDataBtn').addEventListener('click', () => this.clearAllData());
+
+        // ショートカット一覧
+        const showShortcutsBtn = document.getElementById('showShortcutsBtn');
+        if (showShortcutsBtn) {
+            showShortcutsBtn.addEventListener('click', () => this.toggleShortcuts(true));
+        }
+        const shortcutsHeaderBtn = document.getElementById('shortcutsHeaderBtn');
+        if (shortcutsHeaderBtn) {
+            shortcutsHeaderBtn.addEventListener('click', () => this.toggleShortcuts(true));
+        }
+        const closeShortcutsBtn = document.getElementById('closeShortcutsBtn');
+        if (closeShortcutsBtn) {
+            closeShortcutsBtn.addEventListener('click', () => this.toggleShortcuts(false));
+        }
+        const shortcutsOverlay = document.getElementById('shortcutsOverlay');
+        if (shortcutsOverlay) {
+            // 枠の外を押したら閉じる
+            shortcutsOverlay.addEventListener('click', (e) => {
+                if (e.target === shortcutsOverlay) this.toggleShortcuts(false);
+            });
+        }
 
         // 事実確認
         document.getElementById('factCheckClaudeWebBtn').addEventListener('click', () => this.openClaudeWebForFactCheck());
@@ -1071,6 +1099,14 @@ class QuizManager {
         } else {
             this.showNotification('<strong>⚠️ ダウンロードに失敗しました</strong>', 'error');
         }
+    }
+
+    // ================== ショートカット一覧 ==================
+    toggleShortcuts(show) {
+        const overlay = document.getElementById('shortcutsOverlay');
+        if (!overlay) return;
+        const open = show === undefined ? overlay.style.display === 'none' : show;
+        overlay.style.display = open ? 'flex' : 'none';
     }
 
     // ================== タブ切り替え ==================
