@@ -63,6 +63,12 @@ def write_collections(rows_by_section, out_dir, base_name, limit=MAX_PER_COLLECT
     """
     out_dir = out_dir / safe_name(folder_name or base_name)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # 前回の書き出しを消しておく。区分の分かれ方が変わると
+    # 古い名前のCSVが残り、取り込むと同じ問題が二重に入ってしまう
+    for old in out_dir.glob('*.csv'):
+        old.unlink()
+
     written = []
 
     # 中身のある区分だけを対象にする

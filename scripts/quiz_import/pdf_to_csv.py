@@ -482,7 +482,11 @@ def attach_ruby(bases, rubies):
             if min(c['bbox'][2], r['x1']) - max(c['bbox'][0], r['x0']) > 0:
                 pos = idx + 1
         if pos is not None:
-            inserts.setdefault(target, []).append((pos, r['text'].strip()))
+            # PDF側で既に括弧付きのルビ（（あしで）など）はそのまま使う。
+            # 重ねて括弧を付けると ((あしで)) になってしまう
+            reading = r['text'].strip().strip('（）()［］[]')
+            if reading:
+                inserts.setdefault(target, []).append((pos, reading))
 
     out = []
     for i, b in enumerate(bases):
