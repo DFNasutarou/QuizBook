@@ -227,6 +227,10 @@
                     <textarea id="answerInput" rows="2" placeholder="答えを入力してください"></textarea>
                     <div class="text-controls">
                         <button id="factCheckClaudeWebBtn" class="btn btn-small btn-primary">🔍 Claude.ai で事実確認</button>
+                        <label class="fact-check-toggle" for="factCheckedInput" title="この問題の事実確認が済んでいるかを記録する">
+                            <input type="checkbox" id="factCheckedInput">
+                            <span>ファクトチェック済み</span>
+                        </label>
                     </div>
                 </div>
 
@@ -385,6 +389,7 @@
                         <span id="quizSourceTag" class="source-tag"></span>
                         <span id="quizGenreTag" class="genre-tag"></span>
                         <span id="quizDifficultyTag" class="difficulty-tag"></span>
+                        <span id="quizFactCheckedTag" class="fact-tag"></span>
                     </div>
                     <div class="quiz-controls">
                         <button id="prevQuizBtn" class="btn btn-small">◀</button>
@@ -393,6 +398,7 @@
                         <button id="randomQuizBtn" class="btn btn-small">🔀 シャッフル</button>
                         <button id="editCurrentQuizBtn" class="btn btn-secondary btn-small" title="いま表示している問題を編集タブで開く（Eキー）">✏️ この問題を編集</button>
                         <button id="factCheckQuizBtn" class="btn btn-secondary btn-small" title="いま表示している問題の事実確認をClaude.aiに依頼する">🔍 事実確認</button>
+                        <button id="toggleFactCheckedBtn" class="btn btn-secondary btn-small" title="ファクトチェック済みかどうかを切り替える（Fキー）">⬜ 未確認</button>
                     </div>
                 </div>
 

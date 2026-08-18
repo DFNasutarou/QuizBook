@@ -900,6 +900,41 @@ h1 {
     color: #9b2c2c;
 }
 
+/* ファクトチェック済みの表示 */
+.fact-check-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    font-size: 13px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.fact-check-toggle input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
+.fact-tag {
+    display: inline-block;
+    padding: 3px 10px;
+    font-size: 13px;
+    border-radius: 12px;
+    white-space: nowrap;
+}
+
+.fact-tag.checked {
+    color: #1f5133;
+    background: #d7f0e0;
+}
+
+.fact-tag.unchecked {
+    color: #7a5b00;
+    background: #fdf0cf;
+}
+
 /* 出題中: どの問題集の問題かの表示 */
 .source-tag {
     display: inline-block;
