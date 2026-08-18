@@ -542,7 +542,13 @@ class QuizManager {
                 case 'F':
                     if (this.currentTab !== 'quiz') break;
                     e.preventDefault();
-                    this.toggleFactCheckedForCurrentQuiz();
+                    this.toggleCurrentQuizFlag('factChecked');
+                    break;
+                case 'r':
+                case 'R':
+                    if (this.currentTab !== 'quiz') break;
+                    e.preventDefault();
+                    this.toggleCurrentQuizFlag('needsReview');
                     break;
             }
         });
@@ -704,6 +710,10 @@ class QuizManager {
         document.getElementById('quizManageSearch').addEventListener('input', () => this.updateQuizManageList());
         document.getElementById('quizManageGenreFilter').addEventListener('change', () => this.updateQuizManageList());
         document.getElementById('quizManageDifficultyFilter').addEventListener('change', () => this.updateQuizManageList());
+        const quizManageReviewOnly = document.getElementById('quizManageReviewOnly');
+        if (quizManageReviewOnly) {
+            quizManageReviewOnly.addEventListener('change', () => this.updateQuizManageList());
+        }
 
         // 問題編集
         document.getElementById('saveQuizBtn').addEventListener('click', () => this.saveQuiz());
@@ -717,6 +727,10 @@ class QuizManager {
         document.getElementById('searchBox').addEventListener('input', () => this.filterQuizzes());
         document.getElementById('genreFilter').addEventListener('change', () => this.filterQuizzes());
         document.getElementById('difficultyFilter').addEventListener('change', () => this.filterQuizzes());
+        const reviewOnlyFilter = document.getElementById('reviewOnlyFilter');
+        if (reviewOnlyFilter) {
+            reviewOnlyFilter.addEventListener('change', () => this.filterQuizzes());
+        }
 
         // 出題機能
         document.getElementById('startQuizBtn').addEventListener('click', () => this.startQuizMode());
@@ -773,7 +787,11 @@ class QuizManager {
         document.getElementById('factCheckClaudeWebBtn').addEventListener('click', () => this.openClaudeWebForFactCheck());
         const toggleFactCheckedBtn = document.getElementById('toggleFactCheckedBtn');
         if (toggleFactCheckedBtn) {
-            toggleFactCheckedBtn.addEventListener('click', () => this.toggleFactCheckedForCurrentQuiz());
+            toggleFactCheckedBtn.addEventListener('click', () => this.toggleCurrentQuizFlag('factChecked'));
+        }
+        const toggleNeedsReviewBtn = document.getElementById('toggleNeedsReviewBtn');
+        if (toggleNeedsReviewBtn) {
+            toggleNeedsReviewBtn.addEventListener('click', () => this.toggleCurrentQuizFlag('needsReview'));
         }
         const factCheckQuizBtn = document.getElementById('factCheckQuizBtn');
         if (factCheckQuizBtn) {
@@ -1181,6 +1199,7 @@ class QuizManager {
             difficulty: parseInt(document.getElementById('difficultySelect').value),
             tags: tags,
             factChecked: document.getElementById('factCheckedInput').checked,
+            needsReview: document.getElementById('needsReviewInput').checked,
             created_at: this.currentQuiz ? this.currentQuiz.created_at : new Date().toISOString()
         };
 
@@ -1366,6 +1385,7 @@ class QuizManager {
         document.getElementById('difficultySelect').value = '3';
         document.getElementById('tagsInput').value = '';
         document.getElementById('factCheckedInput').checked = false;
+        document.getElementById('needsReviewInput').checked = false;
         this.updateEditTabContext();
     }
 
@@ -1377,6 +1397,7 @@ class QuizManager {
         document.getElementById('difficultySelect').value = quiz.difficulty || 2;
         document.getElementById('tagsInput').value = quiz.tags ? quiz.tags.join(', ') : '';
         document.getElementById('factCheckedInput').checked = !!quiz.factChecked;
+        document.getElementById('needsReviewInput').checked = !!quiz.needsReview;
         this.updateEditTabContext();
     }
 
@@ -1560,6 +1581,13 @@ class QuizManager {
         difficultyTag.textContent = this.difficultyLabel(quiz.difficulty);
         tagsDiv.appendChild(difficultyTag);
 
+        if (quiz.needsReview) {
+            const reviewTag = document.createElement('span');
+            reviewTag.className = 'tag review';
+            reviewTag.textContent = '🚩 要確認';
+            tagsDiv.appendChild(reviewTag);
+        }
+
         if (showTags && Array.isArray(quiz.tags)) {
             quiz.tags.forEach(tag => {
                 const tagSpan = document.createElement('span');
@@ -1580,8 +1608,8 @@ class QuizManager {
         return item;
     }
 
-    // 検索・ジャンル・難易度による絞り込み（一覧タブと並び替えタブで共用）
-    filterQuizList(quizzes, { searchText = '', genre = '', difficulty = '' }) {
+    // 検索・ジャンル・難易度・要確認による絞り込み（一覧タブと並び替えタブで共用）
+    filterQuizList(quizzes, { searchText = '', genre = '', difficulty = '', reviewOnly = false }) {
         const needle = searchText.toLowerCase();
         return quizzes.filter(quiz => {
             const matchSearch = !needle ||
@@ -1589,7 +1617,8 @@ class QuizManager {
                 String(quiz.answer).toLowerCase().includes(needle);
             const matchGenre = !genre || quiz.genre === genre;
             const matchDifficulty = !difficulty || quiz.difficulty === parseInt(difficulty);
-            return matchSearch && matchGenre && matchDifficulty;
+            const matchReview = !reviewOnly || !!quiz.needsReview;
+            return matchSearch && matchGenre && matchDifficulty && matchReview;
         });
     }
 
@@ -1620,13 +1649,17 @@ class QuizManager {
         const quizzes = this.filterQuizList(this.currentCollection.quizzes, {
             searchText: document.getElementById('searchBox').value,
             genre: document.getElementById('genreFilter').value,
-            difficulty: document.getElementById('difficultyFilter').value
+            difficulty: document.getElementById('difficultyFilter').value,
+            reviewOnly: document.getElementById('reviewOnlyFilter')?.checked || false
         });
 
         container.innerHTML = '';
 
         if (quizzes.length === 0) {
-            container.innerHTML = '<p style="padding:20px;">問題がありません</p>';
+            const reviewOnly = document.getElementById('reviewOnlyFilter')?.checked;
+            container.innerHTML = reviewOnly
+                ? '<p style="padding:20px;">要確認の問題はありません</p>'
+                : '<p style="padding:20px;">問題がありません</p>';
             return;
         }
 
@@ -1716,7 +1749,8 @@ class QuizManager {
         const quizzes = this.filterQuizList(this.currentCollection.quizzes, {
             searchText: document.getElementById('quizManageSearch')?.value || '',
             genre: document.getElementById('quizManageGenreFilter')?.value || '',
-            difficulty: document.getElementById('quizManageDifficultyFilter')?.value || ''
+            difficulty: document.getElementById('quizManageDifficultyFilter')?.value || '',
+            reviewOnly: document.getElementById('quizManageReviewOnly')?.checked || false
         });
 
         container.innerHTML = '';
@@ -2326,8 +2360,8 @@ class QuizManager {
         const difficultyTag = document.getElementById('quizDifficultyTag');
         difficultyTag.textContent = this.difficultyLabel(quiz.difficulty);
 
-        // ファクトチェック済みかどうか
-        this.updateFactCheckedDisplay(quiz.factChecked);
+        // ファクトチェック済み・要確認の表示
+        this.updateQuizFlagDisplay(quiz);
 
         // 問題文表示
         document.getElementById('questionDisplay').innerHTML = this.formatText(quiz.question);
@@ -2396,25 +2430,41 @@ class QuizManager {
         }
     }
 
-    // ================== ファクトチェック済みの記録 ==================
-    updateFactCheckedDisplay(checked) {
-        const tag = document.getElementById('quizFactCheckedTag');
-        if (tag) {
-            tag.textContent = checked ? '✅ ファクトチェック済み' : '⬜ 未確認';
-            tag.classList.toggle('checked', !!checked);
-            tag.classList.toggle('unchecked', !checked);
-        }
+    // ================== ファクトチェック済み・要確認の記録 ==================
+    updateQuizFlagDisplay(quiz) {
+        const checked = !!(quiz && quiz.factChecked);
+        const review = !!(quiz && quiz.needsReview);
 
-        const btn = document.getElementById('toggleFactCheckedBtn');
-        if (btn) {
-            btn.textContent = checked ? '✅ 確認済み' : '⬜ 未確認';
-            btn.title = checked
+        const factTag = document.getElementById('quizFactCheckedTag');
+        if (factTag) {
+            factTag.textContent = checked ? '✅ ファクトチェック済み' : '⬜ 未確認';
+            factTag.classList.toggle('checked', checked);
+            factTag.classList.toggle('unchecked', !checked);
+        }
+        const factBtn = document.getElementById('toggleFactCheckedBtn');
+        if (factBtn) {
+            factBtn.textContent = checked ? '✅ 確認済み' : '⬜ 未確認';
+            factBtn.title = checked
                 ? 'ファクトチェック済みを取り消す（Fキー）'
                 : 'ファクトチェック済みにする（Fキー）';
         }
+
+        // 要確認は付いているときだけ目印を出す（普段は付いていない状態が普通のため）
+        const reviewTag = document.getElementById('quizNeedsReviewTag');
+        if (reviewTag) {
+            reviewTag.textContent = '🚩 要確認';
+            reviewTag.style.display = review ? 'inline-block' : 'none';
+        }
+        const reviewBtn = document.getElementById('toggleNeedsReviewBtn');
+        if (reviewBtn) {
+            reviewBtn.textContent = review ? '🚩 要確認' : '⬜ 要確認なし';
+            reviewBtn.title = review
+                ? '要確認の印を外す（Rキー）'
+                : '要確認の印を付ける（Rキー）';
+        }
     }
 
-    toggleFactCheckedForCurrentQuiz() {
+    toggleCurrentQuizFlag(field) {
         if (this.isViewMode) return;
         if (!this.quizMode.active) return;
 
@@ -2433,15 +2483,16 @@ class QuizManager {
             return;
         }
 
-        target.factChecked = !target.factChecked;
-        displayed.factChecked = target.factChecked;
+        target[field] = !target[field];
+        displayed[field] = target[field];
         if (this.currentQuiz && this.currentQuiz.id === target.id) {
             this.currentQuiz = target;
         }
 
-        this.updateFactCheckedDisplay(target.factChecked);
+        this.updateQuizFlagDisplay(target);
         this.saveToLocalStorage();
-        console.log(`${target.factChecked ? '✅' : '⬜'} ファクトチェック${target.factChecked ? '済みにしました' : 'を取り消しました'}: "${target.question.substring(0, 30)}..."`);
+        const label = field === 'factChecked' ? 'ファクトチェック済み' : '要確認';
+        console.log(`${target[field] ? '🔖 付けました' : '⬜ 外しました'}: ${label} — "${target.question.substring(0, 30)}..."`);
     }
 
     // ================== 出題中の問題を編集 ==================
@@ -4285,7 +4336,8 @@ class QuizManager {
             'saveBtn', 'importCsvBtn', 'importCsvFolderBtn',
             'newFolderBtn', 'downloadFolderBtn',
             'newCollectionBtn',
-            'newQuizBtn', 'deleteQuizBtn', 'editCurrentQuizBtn', 'toggleFactCheckedBtn',
+            'newQuizBtn', 'deleteQuizBtn', 'editCurrentQuizBtn',
+            'toggleFactCheckedBtn', 'toggleNeedsReviewBtn',
             'clearDataBtn'
         ];
         hideIds.forEach(id => {

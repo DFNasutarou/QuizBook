@@ -900,8 +900,8 @@ h1 {
     color: #9b2c2c;
 }
 
-/* ファクトチェック済みの表示 */
-.fact-check-toggle {
+/* ファクトチェック済み・要確認の表示 */
+.flag-toggle {
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -911,7 +911,24 @@ h1 {
     user-select: none;
 }
 
-.fact-check-toggle input[type="checkbox"] {
+.flag-toggle input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
+.filter-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 8px;
+    font-size: 13px;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+}
+
+.filter-check input[type="checkbox"] {
     width: 16px;
     height: 16px;
     cursor: pointer;
@@ -933,6 +950,21 @@ h1 {
 .fact-tag.unchecked {
     color: #7a5b00;
     background: #fdf0cf;
+}
+
+.review-tag {
+    display: inline-block;
+    padding: 3px 10px;
+    font-size: 13px;
+    color: #8a2f2f;
+    background: #fbe0e0;
+    border-radius: 12px;
+    white-space: nowrap;
+}
+
+.quiz-item-tags .tag.review {
+    color: #8a2f2f;
+    background: #fbe0e0;
 }
 
 /* 出題中: どの問題集の問題かの表示 */
