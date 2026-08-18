@@ -334,6 +334,20 @@ def is_number_cell(item, cfg):
     return cfg.get('num_min', 0) <= item['x0'] and item['x1'] <= cfg['num_max']
 
 
+def text_runs(line_items, x_from, gap_tol=4):
+    """1行の文字を、途切れの無い塊（run）にまとめて [(左, 右), ...] で返す"""
+    spans = sorted((c['bbox'][0], c['bbox'][2])
+                   for it in line_items for c in it['chars']
+                   if c['c'].strip() and (c['bbox'][0] + c['bbox'][2]) / 2 >= x_from)
+    runs = []
+    for x0, x1 in spans:
+        if runs and x0 - runs[-1][1] < gap_tol:
+            runs[-1][1] = max(runs[-1][1], x1)
+        else:
+            runs.append([x0, x1])
+    return runs
+
+
 def line_boundary(line_items, cfg):
     """1行の中で、問題文と答えの間にある実際の空白から境界Xを求める。
 
@@ -359,21 +373,16 @@ def line_boundary(line_items, cfg):
             if usable and x0 - prev_end > best_gap:
                 best_gap, best_x = x0 - prev_end, mid
         prev_end = max(prev_end or x1, x1)
-    return best_x if best_x is not None else base
+    if best_x is not None:
+        return best_x
 
-
-def text_runs(line_items, x_from, gap_tol=4):
-    """1行の文字を、途切れの無い塊（run）にまとめて [(左, 右), ...] で返す"""
-    spans = sorted((c['bbox'][0], c['bbox'][2])
-                   for it in line_items for c in it['chars']
-                   if c['c'].strip() and (c['bbox'][0] + c['bbox'][2]) / 2 >= x_from)
-    runs = []
-    for x0, x1 in spans:
-        if runs and x0 - runs[-1][1] < gap_tol:
-            runs[-1][1] = max(runs[-1][1], x1)
-        else:
-            runs.append([x0, x1])
-    return runs
+    # 空白が見つからない行（全幅に流し込んだ解説など）で、固定の境界が
+    # 文字の途中に落ちるなら、そこで切らずに塊の右端まで送る。
+    # 列と列の隙間が 2pt しかない作りもあるので、塊はごく狭い間隔でまとめる
+    for x0, x1 in text_runs(line_items, 0, gap_tol=1.5):
+        if x0 < base <= x1:
+            return x1 + 1
+    return base
 
 
 def line_memo_boundary(line_items, cfg, x_split):
@@ -464,6 +473,28 @@ def attach_ruby(bases, rubies):
     return out
 
 
+def has_answer_column(items, cfg, bsize):
+    """そのページに答えの列があるか。
+
+    片の開始位置だけで見ると、全幅に流し込んだ解説ページでも
+    行の途中で片が切れているだけで「答えの列がある」と誤判定してしまう。
+    列の境界には本文の字送りよりはっきり広い空白があるので、
+    境界をまたぐ空白のある行が1行でもあるかで判定する。
+    """
+    x_split = cfg['x_split']
+    least = bsize * 0.5
+    lines = {}
+    for it in items:
+        lines.setdefault(round((it['y0'] + it['y1']) / 2 / LINE_TOLERANCE), []).append(it)
+
+    for row in lines.values():
+        runs = text_runs(row, 0, gap_tol=1.5)
+        for (_, left_end), (right_start, _) in zip(runs, runs[1:]):
+            if left_end < x_split <= right_start and right_start - left_end >= least:
+                return True
+    return False
+
+
 def extract(doc, cfg, pages=None):
     """PDFから (区分, 問題文, 答え, メモ) のレコード列を作る"""
     small_as = cfg.get('small_as', 'body')
@@ -491,7 +522,7 @@ def extract(doc, cfg, pages=None):
         skip_empty_answer = cfg.get('require_answer_column') or (
             cfg.get('answer_x0') is not None and not cfg.get('keep_all_pages')
         )
-        if skip_empty_answer and sum(1 for it in items if it['x0'] >= cfg['x_split']) < 3:
+        if skip_empty_answer and not has_answer_column(items, cfg, bsize):
             continue
 
         threshold = bsize * cfg.get('small_ratio', 0.8)
