@@ -54,8 +54,9 @@ LINE_TOLERANCE = 3
 
 # 問題文らしい終わり方。レイアウト判定の採点にも使う
 QUESTION_END_RE = re.compile(
-    r'(?:[？?]|でしょう[かうっ]?|ですか|は何|は誰|はどこ|という|どれ|まで|'
-    r'答えなさい|お答えください)[\s。]*$'
+    r'(?:[？?]|でしょう[かうっ]?|ですか|という|まで|答えなさい|お答えください|'
+    r'なに|どっち|どちら|いくつ|いつ|だれ|誰|どこ|どれ|何[^。、？?\s]{0,10}'
+    r')[\s。]*$'
 )
 # 答えの末尾に付く判定や注記（記録集でよくある）
 JUDGE_TAIL_RE = re.compile(r'[\[【][^\[\]【】]{0,40}[\]】]\s*$')
@@ -272,23 +273,33 @@ def tune(doc, layout, pages, fixed=()):
     else:
         smalls = [layout['small_as']]
 
+    tried = []
     for source in sources:
         for mode in modes:
-          for small in smalls:
-            cand = dict(layout, anchor_source=source, anchor_mode=mode, small_as=small)
-            rows, _ = to_rows(extract(doc, cand, pages), cand)
-            rows = [r for rs in rows.values() for r in rs]
-            if not rows:
-                continue
-            # 少数だけ拾えた設定が高得点になるのを防ぐため、
-            # 「1ページあたり何問取れたか」で割り引く
-            coverage = min(1.0, len(rows) / max(1, len(pages) * 1.5))
-            s = score(rows) * coverage
-            # 僅差ならルビを本文へ戻す設定を選ぶ（読みが残るほうが役に立つ）
-            if small == 'ruby':
-                s += 0.02
-            if s > best_score:
-                best, best_score = cand, s
+            for small in smalls:
+                cand = dict(layout, anchor_source=source, anchor_mode=mode, small_as=small)
+                rows, _ = to_rows(extract(doc, cand, pages), cand)
+                rows = [r for rs in rows.values() for r in rs]
+                if rows:
+                    tried.append((cand, rows, small))
+
+    if not tried:
+        return best, best_score
+
+    most = max(len(rows) for _, rows, _ in tried)
+    for cand, rows, small in tried:
+        # 少数だけ拾えた設定が高得点になるのを防ぐため、
+        # 「1ページあたり何問取れたか」で割り引く
+        coverage = min(1.0, len(rows) / max(1, len(pages) * 1.5))
+        # 綺麗だが取りこぼしの多い設定が選ばれないよう、いちばん多く
+        # 取れた設定と比べた取得数でも割り引く
+        share = len(rows) / most
+        s = score(rows) * coverage * (0.5 + 0.5 * share)
+        # 僅差ならルビを本文へ戻す設定を選ぶ（読みが残るほうが役に立つ）
+        if small == 'ruby':
+            s += 0.02
+        if s > best_score:
+            best, best_score = cand, s
     return best, best_score
 
 
@@ -401,6 +412,18 @@ def line_memo_boundary(line_items, cfg, x_split):
         return None
 
     runs = text_runs(line_items, x_split)
+
+    # 境界の近くに空白があるなら、そこが答えと備考の切れ目
+    # （答えの右端と備考の左端が数ptしか離れていない作りもある）
+    window = cfg.get('memo_window', 20)
+    nearest = None
+    for (_, left_end), (right_start, _) in zip(runs, runs[1:]):
+        mid = (left_end + right_start) / 2
+        if abs(mid - base) <= window and (nearest is None or abs(mid - base) < abs(nearest - base)):
+            nearest = mid
+    if nearest is not None:
+        return nearest
+
     for i, (x0, x1) in enumerate(runs):
         if not x0 < base <= x1:
             continue
@@ -648,6 +671,25 @@ def extract(doc, cfg, pages=None):
     return records
 
 
+# 「〜でしょう?」「〜は何?」など、問題文が終わったと分かる言い回し。
+# この後ろに続く文字は、解説・次の問題の番号・対戦結果などが
+# 紛れ込んだもの（問題文の列に別の内容が流し込まれている作り）
+QUESTION_TAIL_RE = re.compile(
+    r'(?:でしょう[かうっ]?|ですか|という|なに|どっち|どちら|いくつ|だれ|誰|どこ|'
+    r'何[^\s？?]{0,4})[？?]'
+)
+
+
+def split_question_tail(question):
+    """問題文の後ろに続く余計な文字を切り離して (問題文, 余り) で返す"""
+    last = None
+    for m in QUESTION_TAIL_RE.finditer(question):
+        last = m
+    if last is None or last.end() >= len(question):
+        return question, ''
+    return question[:last.end()], question[last.end():].strip()
+
+
 def to_rows(records, cfg):
     """区分（ペーパー/早押し）ごとに行をまとめる"""
     min_len = cfg.get('min_len', 15)
@@ -657,6 +699,12 @@ def to_rows(records, cfg):
         q = strip_heading(r['q'])
         a = strip_heading(r['a'])
         memo = r['m']
+
+        # 問題文の列に解説や次の問題の番号が流し込まれている作りがある。
+        # 問題文が終わったと分かる言い回しより後ろはメモへ回す
+        q, tail = split_question_tail(q)
+        if tail:
+            memo = f'{tail} {memo}'.strip()
 
         # 答えの末尾に付く判定や注記（[飼い主○]【スルー】など）はメモへ回す
         while True:
@@ -721,17 +769,20 @@ def build_config(doc, args):
     pages = sample_pages(doc)
     cfg, sc = tune(doc, layout, pages, fixed)
 
-    # 成績表や講評など、問題以外の記述が多く混じる記録集では、
-    # 疑問の形で終わらないものを捨てたほうが結果が良くなる。
-    # 取りこぼしが一定を超えたら自動で有効にする（--keep-all で無効化）。
-    if not args.keep_all and not cfg.get('require_question_end'):
-        rows, _ = to_rows(extract(doc, cfg, pages), cfg)
-        rows = [r for rs in rows.values() for r in rs]
-        if rows:
-            ok = sum(1 for r in rows if QUESTION_END_RE.search(r[0])) / len(rows)
-            if ok < 0.75:
-                cfg['require_question_end'] = True
     return cfg, sc
+
+
+def needs_question_end(by_section):
+    """成績表や講評など、問題以外の記述がどれだけ混じっているかを見る。
+
+    多く混じる記録集では、疑問の形で終わらないものを捨てたほうが結果が良い。
+    数ページの見本では混入ページを引かないことがあるので、
+    文書全体を取り出したあとに判断する。
+    """
+    rows = [r for rs in by_section.values() for r in rs]
+    if not rows:
+        return False
+    return sum(1 for r in rows if QUESTION_END_RE.search(r[0])) / len(rows) < 0.9
 
 
 def convert(path, args):
@@ -742,7 +793,13 @@ def convert(path, args):
         return 0
 
     cfg['tag'] = args.tag or path.stem
-    by_section, dropped = to_rows(extract(doc, cfg), cfg)
+    records = extract(doc, cfg)
+    by_section, dropped = to_rows(records, cfg)
+
+    # 問題以外の記述が多い場合は、疑問の形で終わらないものを捨てて取り直す
+    if not args.keep_all and not cfg.get('require_question_end') and needs_question_end(by_section):
+        cfg['require_question_end'] = True
+        by_section, dropped = to_rows(records, cfg)
     by_section, duplicated = dedupe(by_section)
     rows = [r for rs in by_section.values() for r in rs]
 
