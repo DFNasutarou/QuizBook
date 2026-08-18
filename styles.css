@@ -926,8 +926,8 @@ h1 {
 }
 
 .quiz-display {
-    max-width: 1000px;
-    margin: 0 auto;
+    max-width: none;
+    margin: 0;
 }
 
 .quiz-header {

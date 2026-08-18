@@ -37,7 +37,7 @@ class QuizManager {
         };
         this.settings = {
             fontSize: 14,
-            quizFontSize: 20
+            quizFontSize: 32
         };
         this.syncEnabled = false;  // 同期状態
         this.isLoadingFromFirestore = false;  // Firestoreからの読み込み中フラグ
@@ -765,6 +765,10 @@ class QuizManager {
 
         // 事実確認
         document.getElementById('factCheckClaudeWebBtn').addEventListener('click', () => this.openClaudeWebForFactCheck());
+        const factCheckQuizBtn = document.getElementById('factCheckQuizBtn');
+        if (factCheckQuizBtn) {
+            factCheckQuizBtn.addEventListener('click', () => this.factCheckCurrentQuiz());
+        }
 
         // ファイル入力
         document.getElementById('fileInput').addEventListener('change', (e) => this.handleFileLoad(e));
@@ -2948,6 +2952,11 @@ class QuizManager {
                 });
 
                 this.settings = parsed.settings || this.settings;
+                // 出題時フォントサイズの既定を 20px から 32px へ変更した。
+                // 既定のままだった場合だけ引き上げ、自分で変えた値はそのまま残す
+                if (this.settings.quizFontSize === 20) {
+                    this.settings.quizFontSize = 32;
+                }
                 this.limits = parsed.limits || this.limits;
                 this.quizPresets = (Array.isArray(parsed.quizPresets) ? parsed.quizPresets : [])
                     .filter(preset => preset && preset.id && preset.name)
@@ -3885,6 +3894,12 @@ class QuizManager {
         document.getElementById('fontSizeValue').textContent = this.settings.fontSize;
         document.getElementById('quizFontSizeValue').textContent = this.settings.quizFontSize;
 
+        // スライダーのつまみも設定値に合わせる（保存した値と表示がずれるため）
+        const fontSizeSlider = document.getElementById('fontSizeSlider');
+        if (fontSizeSlider) fontSizeSlider.value = this.settings.fontSize;
+        const quizFontSizeSlider = document.getElementById('quizFontSizeSlider');
+        if (quizFontSizeSlider) quizFontSizeSlider.value = this.settings.quizFontSize;
+
         const questionDisplay = document.querySelector('.question-text');
         if (questionDisplay) {
             questionDisplay.style.fontSize = `${this.settings.quizFontSize}px`;
@@ -4292,9 +4307,21 @@ class QuizManager {
     }
 
     // ================== Claude.ai Web版での事実確認 ==================
-    openClaudeWebForFactCheck() {
-        const question = document.getElementById('questionInput').value.trim();
-        const answer = document.getElementById('answerInput').value.trim();
+    factCheckCurrentQuiz() {
+        if (!this.quizMode.active) return;
+        const quiz = this.quizMode.quizzes[this.quizMode.currentIndex];
+        if (!quiz) return;
+        this.openClaudeWebForFactCheck(quiz.question, quiz.answer);
+    }
+
+    openClaudeWebForFactCheck(questionText, answerText) {
+        // 引数が無いときは編集フォームの内容を使う
+        const question = (questionText !== undefined
+            ? questionText
+            : document.getElementById('questionInput').value).trim();
+        const answer = (answerText !== undefined
+            ? answerText
+            : document.getElementById('answerInput').value).trim();
 
         if (!question || !answer) {
             alert('問題文と答えを入力してください');
