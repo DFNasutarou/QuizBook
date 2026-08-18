@@ -207,6 +207,16 @@ def detect_layout(doc):
             layout['num_min'] = max(0, round(min(it['x0'] for it in group) - 3))
             layout['num_max'] = round(max(it['x1'] for it in group) + 3)
 
+    # --- 問題文の列より左にある列（作問者名など）---
+    #     問題文にも番号にも属さない左端の文字は取り込まない。
+    #     「神野芳治【カナで○】量子力学の…」のように、作問者名が
+    #     問題文の先頭にくっつくのを防ぐ。
+    left_edge = layout['q_left']
+    if layout.get('num_min'):
+        left_edge = min(left_edge, layout['num_min'])
+    if left_edge > 0:
+        layout['q_min'] = max(0, left_edge - 5)
+
     # --- ぶら下げインデント（1行目だけ左へ飛び出す形）---
     #     続きの行が最も多く現れる開始位置を基準に、それより左から始まる行を探す
     left = Counter(round(it['x0']) for it in big if it['x0'] < layout['x_split'])
@@ -217,6 +227,8 @@ def detect_layout(doc):
             first, first_n = max(outer, key=lambda t: t[1])
             if first_n >= main_n * 0.1 and main - first <= 40:
                 layout['q_indent'] = round((first + main) / 2)
+                if layout.get('q_min', 0) > first - 5:
+                    layout['q_min'] = max(0, first - 5)
 
     # --- ルビか、右側の補足か ---
     layout['small_as'] = 'body'
